@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Scribird</string>
+	<key>CFBundleDisplayName</key>
+	<string>Scribird</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.scribird.app</string>
+	<key>CFBundleExecutable</key>
+	<string>Scribird</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+
+	<!-- 메뉴바 전용 앱. Dock 아이콘과 메뉴바 메뉴를 띄우지 않는다. -->
+	<key>LSUIElement</key>
+	<true/>
+
+	<!-- 마이크: ScreenCaptureKit의 captureMicrophone이 이 권한을 요구한다. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>회의 중 내 발언을 텍스트로 기록하기 위해 마이크를 사용합니다. 음성은 기기 안에서만 처리되며 외부로 전송되지 않습니다.</string>
+
+	<!-- 음성 인식: 온디바이스 전사를 위해 필요하다. -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>회의 음성을 텍스트로 변환하기 위해 음성 인식을 사용합니다. 모든 처리는 기기 내부에서 이루어집니다.</string>
+
+	<!--
+	  오디오 캡처: 상대방 목소리(시스템 출력)를 Core Audio Process Tap으로 받는다.
+	  화면녹화 권한(NSScreenCaptureUsageDescription)은 필요하지 않다 —
+	  ScreenCaptureKit을 쓰지 않으므로 화면에는 접근조차 하지 않는다.
+	-->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Zoom·Teams 등에서 재생되는 상대방 목소리를 텍스트로 기록하기 위해 시스템 오디오를 캡처합니다. 화면에는 접근하지 않습니다.</string>
+</dict>
+</plist>

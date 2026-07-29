@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  App Sandbox는 끈 상태다. ScreenCaptureKit의 시스템 오디오 캡처는
+	  샌드박스 안에서도 동작하지만, Documents 밖에 회의록을 두거나
+	  나중에 Core Audio 탭으로 갈아탈 여지를 남기려면 끄는 편이 단순하다.
+	  App Store 배포가 목표라면 sandbox를 켜고 파일 접근 범위를 조정해야 한다.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.microphone</key>
+	<true/>
+</dict>
+</plist>
