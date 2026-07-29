@@ -61,7 +61,9 @@ final class SystemAudioCapture: @unchecked Sendable {
     private var converter: AudioStreamConverter?
     private var tapFormat: AVAudioFormat?
     private var framesSent: AVAudioFramePosition = 0
-    private var observedPeak: Float = 0
+
+    /// 입력 레벨. 미터 표시와 무음 감지에 함께 쓴다.
+    let level = AudioLevelTracker()
 
     private var tapID: AudioObjectID = .zero
     private var aggregateID: AudioObjectID = .zero
@@ -80,10 +82,8 @@ final class SystemAudioCapture: @unchecked Sendable {
         return stream
     }
 
-    /// 캡처된 시스템 오디오의 최대 진폭. 0에 가까우면 재생 중인 소리가 없다는 뜻.
-    var peakLevel: Float {
-        lock.withLock { observedPeak }
-    }
+    /// 세션 전체 최대 진폭. 0에 가까우면 재생 중인 소리가 없거나 권한이 없다는 뜻.
+    var peakLevel: Float { level.sessionPeak }
 
     func start() throws {
         guard #available(macOS 14.4, *) else { throw CaptureError.unsupportedOS }
@@ -206,8 +206,7 @@ final class SystemAudioCapture: @unchecked Sendable {
         audioRecorder?.write(buffer, for: .remote)
 
         // 탭은 Float32 인터리브로 온다. peakAmplitude()가 배치를 구분해 읽는다.
-        let peak = buffer.peakAmplitude()
-        lock.withLock { observedPeak = max(observedPeak, peak) }
+        level.submit(peak: buffer.peakAmplitude())
 
         guard let converted = converter.convert(buffer) else { return }
 

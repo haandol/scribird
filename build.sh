@@ -40,11 +40,32 @@ iconutil -c icns "$ICONSET" -o "$ICON_FILE"
 cp "$ICON_FILE" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 
 echo "==> 코드서명"
-# 애드혹 서명(-)으로도 TCC가 동작한다. 다른 사람에게 배포하려면
-# Developer ID 인증서로 바꾸고 공증(notarize)까지 거쳐야 한다.
-codesign --force --sign - \
+# 실제 인증서로 서명해야 TCC 권한 프롬프트가 뜬다.
+#
+# 애드혹 서명(-)은 TeamIdentifier가 비어 안정적인 앱 신원이 없다. 마이크처럼
+# AVFoundation이 명시적으로 요청하는 권한은 그래도 동작하지만, Core Audio
+# 프로세스 탭(kTCCServiceAudioCapture)은 프롬프트가 아예 뜨지 않고 조용히
+# 무음만 흘려보냈다. 그래서 키체인의 서명 인증서를 우선 사용한다.
+#
+# SIGN_IDENTITY 환경변수로 원하는 인증서를 지정할 수 있다.
+if [[ -z "${SIGN_IDENTITY:-}" ]]; then
+	SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+		| grep -oE '"(Developer ID Application|Apple Development)[^"]*"' \
+		| head -1 | tr -d '"')"
+fi
+
+if [[ -n "$SIGN_IDENTITY" ]]; then
+	echo "    인증서: ${SIGN_IDENTITY}"
+else
+	echo "    경고: 서명 인증서가 없어 애드혹으로 서명합니다." >&2
+	echo "    시스템 오디오 캡처 권한 프롬프트가 뜨지 않을 수 있습니다." >&2
+	SIGN_IDENTITY="-"
+fi
+
+codesign --force --sign "$SIGN_IDENTITY" \
 	--entitlements Resources/Scribird.entitlements \
 	--options runtime \
+	--timestamp=none \
 	"$APP_BUNDLE"
 
 codesign --verify --verbose "$APP_BUNDLE"

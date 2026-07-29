@@ -37,8 +37,9 @@ final class MicrophoneCapture: @unchecked Sendable {
     private var startHostTime: UInt64?
     /// 지금까지 넘긴 프레임 수. 시간축을 프레임 기준으로 쌓는다.
     private var framesSent: AVAudioFramePosition = 0
-    /// 실제로 소리가 들어왔는지. 무음만 오면 권한 거부를 의심할 근거가 된다.
-    private var observedPeak: Float = 0
+
+    /// 입력 레벨. 미터 표시와 무음 감지에 함께 쓴다.
+    let level = AudioLevelTracker()
 
     init(targetFormat: AVAudioFormat, audioRecorder: AudioRecorder?) {
         self.targetFormat = targetFormat
@@ -102,13 +103,11 @@ final class MicrophoneCapture: @unchecked Sendable {
         continuation?.finish()
     }
 
-    /// 캡처된 소리의 최대 진폭. 0에 가까우면 권한 거부를 의심한다.
+    /// 세션 전체 최대 진폭. 0에 가까우면 권한 거부를 의심한다.
     ///
     /// macOS는 마이크 권한이 거부돼도 콜백은 그대로 보내고 내용만 0으로 채운다.
     /// 그래서 "콜백이 온다"만으로는 정상 동작을 판단할 수 없다.
-    var peakLevel: Float {
-        lock.withLock { observedPeak }
-    }
+    var peakLevel: Float { level.sessionPeak }
 
     private func handle(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
         guard buffer.frameLength > 0 else { return }
@@ -127,11 +126,11 @@ final class MicrophoneCapture: @unchecked Sendable {
         let converter = self.converter
         let continuation = self.continuation
         let startFrame = framesSent
-
-        // 무음 여부를 판단할 진폭. 입력 장치에 따라 인터리브 배치가 다를 수 있어
-        // peakAmplitude()가 형식을 보고 알맞게 읽는다.
-        observedPeak = max(observedPeak, buffer.peakAmplitude())
         lock.unlock()
+
+        // 입력 장치에 따라 인터리브 배치가 다를 수 있어 peakAmplitude()가
+        // 형식을 보고 알맞게 읽는다. 자체 락을 쓰므로 위 락 밖에서 호출한다.
+        level.submit(peak: buffer.peakAmplitude())
 
         guard let converter, let continuation,
               let converted = converter.convert(buffer)

@@ -127,20 +127,13 @@ struct TranscriptView: View {
     /// 이게 없으면 "시작은 눌렀는데 아무것도 안 나온다"는 상황에서 원인을
     /// 알 수 없다. 권한 거부는 조용히 실패하기 때문이다.
     private var sourceStatusBar: some View {
-        // 마이크 진폭은 계속 변하므로 주기적으로 다시 읽는다.
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 10) {
-                    sourceChip(
-                        .me,
-                        active: recorder.activeSources.contains(.me),
-                        warning: recorder.microphoneIsSilent
-                    )
-                    sourceChip(
-                        .remote,
-                        active: recorder.activeSources.contains(.remote),
-                        warning: false
-                    )
+        // 레벨은 오디오 콜백이 바꾸므로 @Observable이 추적하지 못한다.
+        // 미터답게 보이려면 초당 여러 번 당겨 읽어야 한다.
+        TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { _ in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 14) {
+                    sourceMeter(.me, warning: recorder.microphoneIsSilent)
+                    sourceMeter(.remote, warning: recorder.systemAudioIsSilent)
                     Spacer()
                 }
 
@@ -150,6 +143,25 @@ struct TranscriptView: View {
                         systemImage: "mic.slash.fill",
                         tint: .orange,
                         action: ("마이크 설정 열기", "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                    )
+                } else if recorder.microphoneIsTooQuiet {
+                    // 전사는 되지만 저장된 음성이 너무 작아 나중에 듣기 어려운 상태.
+                    inlineNotice(
+                        "녹음 레벨이 낮습니다. 마이크에 더 가까이 말하거나 시스템 설정 > 사운드에서 입력 볼륨을 올려 주세요.",
+                        systemImage: "waveform.badge.exclamationmark",
+                        tint: .orange,
+                        action: ("사운드 설정 열기", "x-apple.systempreferences:com.apple.preference.sound?input")
+                    )
+                }
+
+                if recorder.systemAudioIsSilent {
+                    // Core Audio는 권한이 없어도 오류 없이 무음을 흘려보낸다.
+                    // 조용히 실패하게 두면 회의가 끝난 뒤에야 알게 된다.
+                    inlineNotice(
+                        "시스템 오디오가 무음입니다. 재생 중인 소리가 없거나, 시스템 설정 > 개인정보 보호 및 보안 > 오디오 녹음에서 Scribird가 허용되지 않았을 수 있습니다.",
+                        systemImage: "speaker.slash.fill",
+                        tint: .orange,
+                        action: ("오디오 녹음 설정 열기", "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
                     )
                 }
 
@@ -167,21 +179,52 @@ struct TranscriptView: View {
         }
     }
 
-    private func sourceChip(_ speaker: Speaker, active: Bool, warning: Bool) -> some View {
-        let tint: Color = !active ? .secondary : (warning ? .orange : .green)
-        return HStack(spacing: 4) {
+    /// 소스 하나의 상태 + 실시간 입력 레벨 미터.
+    private func sourceMeter(_ speaker: Speaker, warning: Bool) -> some View {
+        let level = recorder.inputLevel(for: speaker)
+        let active = level != nil
+        let quality = level?.quality
+        let tint: Color = if !active {
+            .secondary
+        } else if warning || quality == .silent {
+            .orange
+        } else {
+            .green
+        }
+
+        return HStack(spacing: 5) {
             Image(systemName: active ? speaker.symbol : "xmark.circle")
                 .font(.system(size: 9))
+                .foregroundStyle(tint)
             Text(speaker.displayName)
                 .font(.system(size: 10, weight: .medium))
-            Text(active ? (warning ? "무음" : "수신") : "꺼짐")
-                .font(.system(size: 9))
-                .opacity(0.8)
+                .foregroundStyle(tint)
+
+            if let level {
+                LevelBar(value: level.meter, quality: level.quality)
+                // dBFS를 함께 보여줘야 "작다"는 체감을 숫자로 확인할 수 있다.
+                Text(level.decibels > -99
+                     ? String(format: "%.0f dB", level.decibels)
+                     : "—")
+                    .font(.system(size: 9, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(Self.qualityColor(level.quality))
+                    .frame(width: 42, alignment: .leading)
+            } else {
+                Text("꺼짐")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(tint.opacity(0.12), in: .rect(cornerRadius: 5))
+    }
+
+    static func qualityColor(_ quality: MeetingRecorder.InputLevel.Quality) -> Color {
+        switch quality {
+        case .silent: .secondary
+        case .tooQuiet: .orange
+        case .good: .green
+        case .tooLoud: .red
+        }
     }
 
     private func inlineNotice(
@@ -330,6 +373,40 @@ struct TranscriptView: View {
         .font(.system(size: 11))
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
+    }
+}
+
+/// 입력 레벨 바.
+///
+/// 눈금에 권장 구간(-24~-3 dBFS)을 표시해서, 바가 어디쯤 있어야 적정한지
+/// 알 수 있게 한다. 숫자만으로는 "-40dB가 낮은 건가?"를 판단하기 어렵다.
+private struct LevelBar: View {
+    let value: Float
+    let quality: MeetingRecorder.InputLevel.Quality
+
+    /// -60dBFS를 0, 0dBFS를 1로 놓은 눈금에서 권장 구간의 시작점(-24dBFS).
+    private let goodZoneStart = 0.6
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.quaternary)
+
+                // 권장 구간 표시. 바가 이 영역에 닿아야 레벨이 충분하다.
+                Capsule()
+                    .fill(.green.opacity(0.18))
+                    .frame(width: width * (1 - goodZoneStart))
+                    .offset(x: width * goodZoneStart)
+
+                Capsule()
+                    .fill(TranscriptView.qualityColor(quality))
+                    .frame(width: max(2, width * Double(value)))
+            }
+        }
+        .frame(width: 72, height: 4)
+        .animation(.linear(duration: 0.08), value: value)
     }
 }
 

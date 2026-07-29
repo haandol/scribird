@@ -50,6 +50,81 @@ final class MeetingRecorder {
         return microphone.peakLevel < 0.0005
     }
 
+    /// 시스템 오디오가 무음만 흘려보내는 상태인지.
+    ///
+    /// Core Audio는 오디오 캡처 권한(`kTCCServiceAudioCapture`)이 없어도 탭 생성과
+    /// aggregate device 구성을 **성공으로 반환**하고 콜백까지 정상적으로 보낸다.
+    /// 다만 내용이 전부 0이다. 실측으로 확인한 실패 모드:
+    ///
+    /// ```
+    /// tap 생성 status=0, aggregate status=0, 콜백 374회
+    /// → 논제로 샘플 0개, 최대 진폭 0.00000
+    /// ```
+    ///
+    /// 탭 구성(전역/PID 명시/private 여부/서브디바이스 유무)을 다섯 가지로 바꿔
+    /// 시험해도 결과가 동일했으므로 구성 문제가 아니라 권한 문제다. 반환값만
+    /// 믿으면 "정상 녹음 중"으로 보이므로, 진폭을 근거로 따로 판정해야 한다.
+    var systemAudioIsSilent: Bool {
+        guard activeSources.contains(.remote), let systemAudio else { return false }
+        // 재생 중인 소리가 원래 없을 수도 있으니 충분히 기다린 뒤 판단한다.
+        guard let startedAt, Date().timeIntervalSince(startedAt) > 8 else { return false }
+        return systemAudio.peakLevel < 0.0005
+    }
+
+    /// 마이크 레벨이 낮아 저장된 음성이 나중에 쓰기 어려운 상태인지.
+    ///
+    /// 피크가 아니라 **발화 구간 평균**으로 판단한다. 실측 예에서 피크는
+    /// -11.6 dBFS로 정상이었지만 평균은 -47.6 dBFS였다 — 순간적으로만 크고
+    /// 전반적으로 작은 녹음은 피크만 보면 놓친다.
+    ///
+    /// 전사는 이 레벨에서도 되므로 오류가 아니라 안내로 다룬다.
+    var microphoneIsTooQuiet: Bool {
+        guard activeSources.contains(.me), let microphone else { return false }
+        guard microphone.level.hasEnoughSamples else { return false }
+        // 음성 녹음 권장 RMS는 -24~-18 dBFS다. -30보다 낮으면 알린다.
+        return microphone.level.averageDecibels < -30
+    }
+
+    /// 소스별 실시간 입력 레벨. 미터 표시용.
+    ///
+    /// `@Observable`은 오디오 콜백이 갱신하는 값을 추적할 수 없다(메인 액터 밖에서
+    /// 초당 수십 번 바뀐다). 그래서 UI가 `TimelineView`로 주기적으로 당겨 읽는다.
+    func inputLevel(for speaker: Speaker) -> InputLevel? {
+        let tracker: AudioLevelTracker? = switch speaker {
+        case .me: microphone?.level
+        case .remote: systemAudio?.level
+        }
+        guard let tracker, activeSources.contains(speaker) else { return nil }
+        return InputLevel(meter: tracker.meterValue, decibels: tracker.decibels)
+    }
+
+    struct InputLevel {
+        /// 0...1로 정규화된 미터 값 (dBFS 기반).
+        let meter: Float
+        /// 사람이 읽는 dBFS. 레벨이 적정한지 판단할 근거.
+        let decibels: Float
+
+        /// 녹음 레벨 진단.
+        ///
+        /// 음성 녹음의 통상 권장치는 피크 -12~-6 dBFS다. 그보다 훨씬 낮으면
+        /// 전사는 되더라도 나중에 사람이 듣거나 재처리할 때 아쉽다.
+        enum Quality {
+            case silent
+            case tooQuiet
+            case good
+            case tooLoud
+        }
+
+        var quality: Quality {
+            switch decibels {
+            case ..<(-50): .silent
+            case ..<(-24): .tooQuiet
+            case ..<(-3): .good
+            default: .tooLoud
+            }
+        }
+    }
+
     private let timeline = TranscriptTimeline()
     private var microphone: MicrophoneCapture?
     private var systemAudio: SystemAudioCapture?
