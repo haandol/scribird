@@ -59,6 +59,11 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - **Use Carbon `RegisterEventHotKey` for the global shortcut.** An `NSEvent` global
   monitor requires accessibility permission (`kTCCServiceAccessibility`), which breaks the
   rule that this app asks only for microphone and audio capture.
+- **Register the hotkey from the app-launch callback, not a view's lifecycle.** A
+  `MenuBarExtra`'s content closure is not built until the user first opens the popover, so
+  registering inside it left the shortcut dead until the menu-bar icon was clicked once —
+  and because registration never ran, the existing failure notice did not surface it
+  either. Anything that must work before any UI is drawn belongs in the app delegate.
 - **Never fetch without the user asking.** The update check is the only network call in
   the app, and it fires only from the button press. Do not add a launch check, a periodic
   check, or a preference that enables one — even defaulted off, that turns "this app makes
