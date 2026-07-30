@@ -14,6 +14,12 @@ let package = Package(
                     "-Xfrontend", "-enable-actor-data-race-checks",
                 ], .when(configuration: .debug)),
             ]
-        )
+        ),
+        .testTarget(
+            name: "ScribirdTests",
+            dependencies: ["Scribird"],
+            path: "Tests/ScribirdTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
     ]
 )
