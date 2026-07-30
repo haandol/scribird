@@ -1,0 +1,35 @@
+// For format details, see https://aka.ms/devcontainer.json.
+//
+// git 작업(커밋·push·브랜치 정리)을 빠르게 하기 위한 컨테이너다. Swift 툴체인은 없다 —
+// Package.swift 가 .macOS(.v26) 을 요구하고 AVFoundation / SpeechAnalyzer / Core Audio
+// 프로세스 탭이 Linux 에 존재하지 않아 컨테이너 안에서는 빌드가 성립하지 않는다.
+// 빌드·테스트·수동 스모크 테스트는 호스트 macOS 에서 ./build.sh, swift test 로 한다.
+//
+// features 는 쓰지 않는다. 기존에 쓰던 것들(common-utils 를 뺀 git, node, aws-cli,
+// modern-shell-utils, lazygit-linuxbinary)은 apt/glibc 를 전제하므로 Alpine 에서 설치가
+// 깨진다. 필요한 도구는 Dockerfile 의 apk 한 줄로 받는다 (이미지 109MB, 빌드 7초).
+{
+  "name": "Scribird (git, Alpine)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "extensions.verifySignature": false,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "git.autofetch": true
+      },
+      "extensions": [
+        "mhutchie.git-graph",
+        "ChaitanyaShahare.lazygit",
+        "shardulm94.trailing-spaces"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${env:HOME}${env:USERPROFILE}/.ssh,target=/root/.ssh,type=bind,readonly"
+  ],
+  "postStartCommand": "/bin/sh .devcontainer/post-start.sh",
+  "shutdownAction": "none"
+}
