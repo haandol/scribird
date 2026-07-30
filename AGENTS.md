@@ -12,7 +12,8 @@ happens on-device; nothing leaves the machine. Application code lives under
   and multilingual arbitration.
 - `Transcript/`: speaker and segment models, timeline merging, and JSONL/Markdown
   persistence.
-- `UI/`: the SwiftUI transcript view, the floating window, and global-hotkey registration.
+- `UI/`: the SwiftUI transcript view, the settings window, the floating window,
+  global-hotkey registration, and the update check.
 - `MeetingRecorder.swift`: application state and pipeline orchestration.
 
 Bundle metadata, entitlements, and the editable app icon are in `Resources/`. Generated
@@ -58,6 +59,14 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - **Use Carbon `RegisterEventHotKey` for the global shortcut.** An `NSEvent` global
   monitor requires accessibility permission (`kTCCServiceAccessibility`), which breaks the
   rule that this app asks only for microphone and audio capture.
+- **Never fetch without the user asking.** The update check is the only network call in
+  the app, and it fires only from the button press. Do not add a launch check, a periodic
+  check, or a preference that enables one — even defaulted off, that turns "this app makes
+  no network requests" into a claim the user has to verify in settings. The request must
+  also carry nothing the app produced: no transcript, no usage counts, no device id.
+- **Compare versions positionally.** String comparison ranks `0.10.0` below `0.9.0`, so a
+  user on 0.9.0 is never told about the 0.10.0 release. Read the running version from the
+  bundle rather than a constant in code, or the two drift apart.
 - **Do not weaken Swift 6 concurrency checking** to resolve a data-race diagnostic.
   Audio callbacks run off the main actor; use the existing lock/handoff patterns.
 
@@ -68,7 +77,7 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `open build/Scribird.app`: run the locally built bundle.
 - `./install.sh`: release-build and replace `/Applications/Scribird.app`; restart an
   already running copy for the new build to take effect.
-- `swift test`: run the unit test suite (128 tests, no hardware required).
+- `swift test`: run the unit test suite (158 tests, no hardware or network required).
 
 Run the app as a bundle rather than as a bare executable, because macOS ties microphone
 and audio-capture permissions (TCC) to the bundle identifier.
@@ -94,6 +103,11 @@ That convention is why the invariants above are recoverable. No formatter or lin
 configured, so keep changes consistent with nearby code.
 
 ## Testing Guidelines
+
+Tests must not reach the network. The update-check tests intercept `URLProtocol` and
+synthesize responses; add nothing that talks to a real host. Note that `Bundle.main` under
+`swift test` is the test runner, not the app, so it reports the macOS version — inject the
+version being compared instead of reading the bundle.
 
 Tests live under `Tests/ScribirdTests/` and run with `swift test`. Name XCTest methods
 `test_<behavior>_<expectedResult>()` and keep them deterministic — no sleeps, no real
@@ -130,6 +144,12 @@ Carbon event target nor a live capture rotation exists under `swift test`:
 - Press the hotkey from another frontmost app, click that app, and confirm the transcript
   window stays visible. Then set a combination already taken by another app and confirm
   the footer reports the failure instead of failing silently.
+- Open settings with `⌘,`, confirm the transcript window behind it stays visible and
+  recording continues, and that the language and audio-saving rows are disabled with a
+  stated reason while recording.
+- Press the version check with the network off and confirm it reports a failure that
+  leaves recording unaffected. With the network on, confirm it distinguishes "up to date"
+  from a failure — silence for either would be indistinguishable to the user.
 
 ## Commit & Pull Request Guidelines
 

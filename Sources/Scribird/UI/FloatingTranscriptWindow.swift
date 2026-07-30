@@ -11,10 +11,16 @@ final class FloatingTranscriptWindow {
     private var window: NSWindow?
     private let recorder: MeetingRecorder
     private let settings: HotKeySettings
+    private let openSettings: () -> Void
 
-    init(recorder: MeetingRecorder, settings: HotKeySettings) {
+    init(
+        recorder: MeetingRecorder,
+        settings: HotKeySettings,
+        openSettings: @escaping () -> Void
+    ) {
         self.recorder = recorder
         self.settings = settings
+        self.openSettings = openSettings
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
@@ -55,7 +61,11 @@ final class FloatingTranscriptWindow {
         // 전체 화면 회의 앱 위에서도 보이게 한다.
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.contentView = NSHostingView(
-            rootView: TranscriptView(recorder: recorder, hotKeySettings: settings)
+            rootView: TranscriptView(
+                recorder: recorder,
+                hotKeySettings: settings,
+                openSettings: openSettings
+            )
         )
         window.center()
         // 위치·크기를 기억해 다음 실행에서도 같은 자리에 뜬다.

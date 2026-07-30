@@ -63,6 +63,16 @@
           "path": "docs/adr/session/0002-global-hotkey-floating-window.md",
           "status": "Proposed",
           "summary": "전역 단축키(기본 ⌥⌘S, 변경 가능)로 포커스를 잃어도 닫히지 않는 전사 창을 띄운다"
+        },
+        {
+          "path": "docs/adr/session/0003-settings-surface-separation.md",
+          "status": "Proposed",
+          "summary": "회의 중 보는 것만 전사 화면에 남기고 설정은 ⌘,로 여는 별도 창으로 분리한다"
+        },
+        {
+          "path": "docs/adr/session/0004-user-initiated-update-check.md",
+          "status": "Proposed",
+          "summary": "버전 확인은 사용자가 누를 때만 조회하고 앱이 내려받지는 않는다 (자동 조회 없음)"
         }
       ],
       "dependsOn": ["capture", "transcription", "archive"]
