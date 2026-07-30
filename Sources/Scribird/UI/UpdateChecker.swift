@@ -38,7 +38,7 @@ final class UpdateChecker {
     /// 조회 요청에는 앱이 만든 어떤 데이터도 담지 않는다 — 회의 내용도, 사용 통계도,
     /// 기기 식별자도 보내지 않는다. 버전 확인이 추적 경로가 되지 않아야 한다.
     static let defaultReleasesURL = URL(
-        string: "https://api.github.com/repos/haandol/meeting-notes/releases/latest"
+        string: "https://api.github.com/repos/haandol/scribird/releases/latest"
     )!
 
     init(
