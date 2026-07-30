@@ -88,8 +88,10 @@ final class SystemAudioCapture: @unchecked Sendable {
     func start() throws {
         guard #available(macOS 14.4, *) else { throw CaptureError.unsupportedOS }
 
-        // 1) 시스템 전체 출력을 스테레오로 믹스다운하는 탭. 우리 앱 소리는 제외해
-        //    되돌아온 소리가 다시 전사되는 것을 막는다.
+        // 1) 시스템 전체 출력을 스테레오로 믹스다운하는 탭.
+        //
+        //    제외 목록을 비워 둔다. 이 앱은 소리를 재생하지 않으므로 자기 출력이
+        //    되돌아올 일이 없고, 따라서 자기 프로세스를 뺄 이유가 없다.
         let description = CATapDescription(
             stereoMixdownOfProcesses: []
         )

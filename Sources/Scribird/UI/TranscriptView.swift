@@ -318,10 +318,15 @@ struct TranscriptView: View {
                 .frame(maxWidth: 320)
             HStack(spacing: 8) {
                 // 권한 문제일 때만 설정으로 보낸다. 저장 실패 같은 경우엔 무의미하다.
+                //
+                // 이 앱은 화면 녹화 권한을 쓰지 않는다. 실패할 수 있는 권한은
+                // 마이크와 오디오 녹음뿐이므로, 메시지에 따라 알맞은 창을 연다.
                 if message.contains("권한") {
-                    Button("시스템 설정 열기") {
+                    let isMicrophone = message.contains("마이크")
+                    Button(isMicrophone ? "마이크 설정 열기" : "오디오 녹음 설정 열기") {
+                        let pane = isMicrophone ? "Privacy_Microphone" : "Privacy_AudioCapture"
                         NSWorkspace.shared.open(
-                            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+                            URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!
                         )
                     }
                 }
@@ -384,8 +389,12 @@ private struct LevelBar: View {
     let value: Float
     let quality: MeetingRecorder.InputLevel.Quality
 
-    /// -60dBFS를 0, 0dBFS를 1로 놓은 눈금에서 권장 구간의 시작점(-24dBFS).
+    /// -60dBFS를 0, 0dBFS를 1로 놓은 눈금에서 권장 구간의 경계.
+    ///
+    /// 음영이 천장까지 닿으면 과입력 구간(-3dBFS 이상)까지 "권장"으로 보이므로
+    /// 상단을 quality의 tooLoud 경계에서 끊는다.
     private let goodZoneStart = 0.6
+    private let goodZoneEnd = 0.95
 
     var body: some View {
         GeometryReader { geometry in
@@ -397,7 +406,7 @@ private struct LevelBar: View {
                 // 권장 구간 표시. 바가 이 영역에 닿아야 레벨이 충분하다.
                 Capsule()
                     .fill(.green.opacity(0.18))
-                    .frame(width: width * (1 - goodZoneStart))
+                    .frame(width: width * (goodZoneEnd - goodZoneStart))
                     .offset(x: width * goodZoneStart)
 
                 Capsule()
