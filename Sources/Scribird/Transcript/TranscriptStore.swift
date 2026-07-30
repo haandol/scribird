@@ -49,7 +49,10 @@ actor TranscriptStore {
         guard let handle, var data = try? encoder.encode(record) else { return }
         data.append(0x0A)  // newline
         try? handle.write(contentsOf: data)
-        // 크래시에도 살아남게 하려면 flush가 필요하다.
+        // 앱 크래시에는 write(2) 자체로 이미 안전하다 — FileHandle.write는 버퍼링
+        // 없이 커널로 넘기므로 프로세스가 죽어도 페이지 캐시에 남는다. 이 fsync는
+        // 그보다 위인 OS 패닉·전원 손실을 대비한다. 회의록은 다시 만들 수 없으므로
+        // 발화당 한 번의 동기화 비용을 받아들인다.
         try? handle.synchronize()
     }
 

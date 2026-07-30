@@ -1,0 +1,71 @@
+{
+  "$schema": "https://raw.githubusercontent.com/haandol/alps-writer-plugins/main/plugins/adr-writer/templates/adr/mapping.schema.json",
+  "categories": {
+    "capture": {
+      "feature": "회의 오디오 캡처",
+      "subdomainType": "core",
+      "adrs": [
+        {
+          "path": "docs/adr/capture/0001-system-audio-process-tap.md",
+          "status": "Proposed",
+          "summary": "시스템 출력은 Core Audio Process Tap으로 받아 화면 녹화 권한을 요구하지 않는다"
+        },
+        {
+          "path": "docs/adr/capture/0002-silent-capture-detection.md",
+          "status": "Proposed",
+          "summary": "캡처 API가 권한 없이도 성공을 반환하므로 성공 여부를 버퍼 진폭으로 판정한다"
+        },
+        {
+          "path": "docs/adr/capture/0003-per-source-failure-isolation.md",
+          "status": "Proposed",
+          "summary": "두 소스를 독립적으로 시작하고 둘 다 실패할 때만 세션을 접는다"
+        },
+        {
+          "path": "docs/adr/capture/0004-input-level-diagnostics.md",
+          "status": "Proposed",
+          "summary": "레벨을 미터·무음판정·발화평균 세 값으로 나눠 추적하고 원본에 게인 보정을 하지 않는다"
+        }
+      ],
+      "dependsOn": []
+    },
+    "transcription": {
+      "feature": "온디바이스 전사와 화자 구분",
+      "subdomainType": "core",
+      "adrs": [
+        {
+          "path": "docs/adr/transcription/0001-source-based-speaker-attribution.md",
+          "status": "Proposed",
+          "summary": "소스별 독립 분석기로 화자를 확정하고 나 vs 상대방 전원 2분리를 상한으로 수용한다"
+        },
+        {
+          "path": "docs/adr/transcription/0002-token-level-language-arbitration.md",
+          "status": "Proposed",
+          "summary": "다국어 결과를 토큰 단위 구역별 지속시간 가중 신뢰도로 중재한다"
+        },
+        {
+          "path": "docs/adr/transcription/0003-model-provisioning-gate.md",
+          "status": "Proposed",
+          "summary": "로케일 예약·모델 설치가 끝난 뒤에 오디오 포맷을 확정하고 캡처를 시작한다"
+        }
+      ],
+      "dependsOn": ["capture"]
+    },
+    "archive": {
+      "feature": "회의록과 원본 오디오 보관",
+      "subdomainType": "supporting",
+      "adrs": [
+        {
+          "path": "docs/adr/archive/0001-transcript-durability.md",
+          "status": "Proposed",
+          "summary": "확정 발화를 즉시 append하고 읽기용 회의록은 종료 시 생성하며 마무리를 시간 제한한다"
+        },
+        {
+          "path": "docs/adr/archive/0002-original-audio-format.md",
+          "status": "Proposed",
+          "summary": "원본을 소스별로 리샘플링 전 AAC 128k로 저장한다 (64k는 재전사 오인식 발생)"
+        }
+      ],
+      "dependsOn": ["transcription"]
+    }
+  }
+}
