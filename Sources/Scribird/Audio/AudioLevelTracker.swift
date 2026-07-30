@@ -93,13 +93,4 @@ final class AudioLevelTracker: @unchecked Sendable {
         let level = recentLevel
         return level > 0 ? 20 * log10(level) : -Float.infinity
     }
-
-    func reset() {
-        lock.withLock {
-            recent = 0
-            peak = 0
-            activeSum = 0
-            activeCount = 0
-        }
-    }
 }

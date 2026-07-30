@@ -13,8 +13,8 @@ import XCTest
 @MainActor
 final class InputLevelQualityTests: XCTestCase {
 
-    private func quality(_ decibels: Float) -> MeetingRecorder.InputLevel.Quality {
-        MeetingRecorder.InputLevel(
+    private func quality(_ decibels: Float) -> InputLevel.Quality {
+        InputLevel(
             meter: AudioLevelTracker.normalize(pow(10, decibels / 20)),
             decibels: decibels
         ).quality
@@ -93,12 +93,10 @@ final class InputLevelQualityTests: XCTestCase {
     // MARK: - 진단 순서
 
     func test_qualityBands_areOrderedByLevel() {
-        let ordered: [MeetingRecorder.InputLevel.Quality] =
+        let ordered: [InputLevel.Quality] =
             [quality(-70), quality(-40), quality(-12), quality(-1)]
 
         XCTAssertEqual(ordered, [.silent, .tooQuiet, .good, .tooLoud],
                        "레벨이 오를수록 진단이 순서대로 바뀌어야 한다")
     }
 }
-
-extension MeetingRecorder.InputLevel.Quality: @retroactive Equatable {}

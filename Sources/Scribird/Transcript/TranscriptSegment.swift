@@ -156,9 +156,3 @@ extension CMTimeRange {
     }
 }
 
-/// `00:04:12` 형태의 타임코드.
-func formatTimecode(_ seconds: TimeInterval) -> String {
-    guard seconds.isFinite, seconds >= 0 else { return "00:00:00" }
-    let total = Int(seconds.rounded(.down))
-    return String(format: "%02d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
-}

@@ -29,11 +29,7 @@ final class AudioStreamConverter {
 
         // 이 입력 버퍼는 딱 한 번만 넘긴다. 두 번째 호출에서 noDataNow를 반환해야
         // 변환기가 "지금 줄 수 있는 것까지 내보내고 멈춤" 상태로 빠진다.
-        //
-        // 입력 블록은 @Sendable로 선언돼 있지만 실제로는 convert(to:error:) 안에서
-        // 동기로 호출된다. 그래서 상태를 지역 var로 캡처하면 Swift 6 격리 검사에
-        // 걸린다. 박스 클래스에 담아 참조 캡처로 바꿔 경합 없이 넘긴다.
-        let pending = PendingInput(buffer: input)
+        let pending = OneShotBuffer(input)
         var conversionError: NSError?
         let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
             guard let buffer = pending.take() else {
@@ -52,22 +48,5 @@ final class AudioStreamConverter {
         @unknown default:
             return nil
         }
-    }
-}
-
-/// 입력 버퍼를 한 번만 내주는 1회용 상자.
-///
-/// `AVAudioConverter`의 입력 블록은 동기로 실행되지만 `@Sendable`이라 지역 변수를
-/// 변경 캡처할 수 없다. 값을 참조 뒤로 숨겨서 그 제약을 우회한다.
-private final class PendingInput: @unchecked Sendable {
-    private var buffer: AVAudioPCMBuffer?
-
-    init(buffer: AVAudioPCMBuffer) {
-        self.buffer = buffer
-    }
-
-    func take() -> AVAudioPCMBuffer? {
-        defer { buffer = nil }
-        return buffer
     }
 }

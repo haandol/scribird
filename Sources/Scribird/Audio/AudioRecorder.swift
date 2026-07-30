@@ -59,7 +59,7 @@ final class AudioRecorder: @unchecked Sendable {
         // 캡처 콜백이 끝나면 버퍼가 재사용될 수 있으니 복사해서 큐에 넘긴다.
         // AVAudioPCMBuffer는 Sendable이 아니므로 전용 상자에 담아 소유권을 옮긴다.
         guard let copy = buffer.copied() else { return }
-        let handoff = BufferHandoff(buffer: copy)
+        let handoff = OneShotBuffer(copy)
         queue.async { [weak self] in
             guard let self, let buffer = handoff.take() else { return }
             self.writeSync(buffer, for: speaker)
@@ -218,26 +218,6 @@ final class AudioRecorder: @unchecked Sendable {
             case .fileNotFinalized(let name):
                 "\(name)을 재생 가능한 파일로 마무리하지 못했습니다."
             }
-        }
-    }
-}
-
-/// 논-Sendable 버퍼를 큐 경계 너머로 한 번만 넘기는 상자.
-///
-/// 캡처 스레드가 복사본을 만들어 넣고 쓰기 큐가 꺼내 간다. 두 곳이 동시에
-/// 같은 버퍼를 만지지 않는다는 것이 `take()`의 1회성으로 보장된다.
-private final class BufferHandoff: @unchecked Sendable {
-    private let lock = NSLock()
-    private var buffer: AVAudioPCMBuffer?
-
-    init(buffer: AVAudioPCMBuffer) {
-        self.buffer = buffer
-    }
-
-    func take() -> AVAudioPCMBuffer? {
-        lock.withLock {
-            defer { buffer = nil }
-            return buffer
         }
     }
 }

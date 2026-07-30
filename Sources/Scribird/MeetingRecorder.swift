@@ -39,22 +39,12 @@ final class MeetingRecorder {
     /// 일부 소스만 켜졌을 때 사용자에게 알릴 사유.
     private(set) var sourceWarning: String?
 
-    /// 마이크에서 실제로 소리가 들어오고 있는지.
+    /// 소스가 무음만 흘려보내는 상태인지.
     ///
-    /// macOS는 마이크 권한이 거부돼도 콜백을 그대로 보내고 내용만 0으로 채운다.
-    /// 그래서 "캡처가 시작됐다"만으로는 정상 동작을 알 수 없고, 진폭을 봐야 한다.
-    var microphoneIsSilent: Bool {
-        guard activeSources.contains(.me), let microphone else { return false }
-        // 시작 직후에는 아직 소리가 없을 수 있으니 몇 초 지난 뒤부터 판단한다.
-        guard let startedAt, Date().timeIntervalSince(startedAt) > 4 else { return false }
-        return microphone.peakLevel < 0.0005
-    }
-
-    /// 시스템 오디오가 무음만 흘려보내는 상태인지.
-    ///
-    /// Core Audio는 오디오 캡처 권한(`kTCCServiceAudioCapture`)이 없어도 탭 생성과
-    /// aggregate device 구성을 **성공으로 반환**하고 콜백까지 정상적으로 보낸다.
-    /// 다만 내용이 전부 0이다. 실측으로 확인한 실패 모드:
+    /// **권한 거부는 조용히 실패한다.** macOS는 마이크 권한이 거부돼도 콜백을 그대로
+    /// 보내고 내용만 0으로 채운다. Core Audio는 한술 더 떠서 오디오 캡처 권한
+    /// (`kTCCServiceAudioCapture`)이 없어도 탭 생성과 aggregate device 구성을
+    /// **성공으로 반환**한다. 실측으로 확인한 실패 모드:
     ///
     /// ```
     /// tap 생성 status=0, aggregate status=0, 콜백 374회
@@ -64,11 +54,13 @@ final class MeetingRecorder {
     /// 탭 구성(전역/PID 명시/private 여부/서브디바이스 유무)을 다섯 가지로 바꿔
     /// 시험해도 결과가 동일했으므로 구성 문제가 아니라 권한 문제다. 반환값만
     /// 믿으면 "정상 녹음 중"으로 보이므로, 진폭을 근거로 따로 판정해야 한다.
-    var systemAudioIsSilent: Bool {
-        guard activeSources.contains(.remote), let systemAudio else { return false }
-        // 재생 중인 소리가 원래 없을 수도 있으니 충분히 기다린 뒤 판단한다.
-        guard let startedAt, Date().timeIntervalSince(startedAt) > 8 else { return false }
-        return systemAudio.peakLevel < 0.0005
+    func isSilent(_ speaker: Speaker) -> Bool {
+        guard let capture = capture(for: speaker) else { return false }
+        // 시작 직후에는 아직 소리가 없을 수 있으니 유예 시간을 준다.
+        guard let startedAt,
+              Date().timeIntervalSince(startedAt) > SilenceCriteria.gracePeriod(for: speaker)
+        else { return false }
+        return capture.peakLevel < SilenceCriteria.threshold
     }
 
     /// 마이크 레벨이 낮아 저장된 음성이 나중에 쓰기 어려운 상태인지.
@@ -79,10 +71,10 @@ final class MeetingRecorder {
     ///
     /// 전사는 이 레벨에서도 되므로 오류가 아니라 안내로 다룬다.
     var microphoneIsTooQuiet: Bool {
-        guard activeSources.contains(.me), let microphone else { return false }
-        guard microphone.level.hasEnoughSamples else { return false }
+        guard let capture = capture(for: .me) else { return false }
+        guard capture.level.hasEnoughSamples else { return false }
         // 음성 녹음 권장 RMS는 -24~-18 dBFS다. -30보다 낮으면 알린다.
-        return microphone.level.averageDecibels < -30
+        return capture.level.averageDecibels < -30
     }
 
     /// 소스별 실시간 입력 레벨. 미터 표시용.
@@ -90,38 +82,19 @@ final class MeetingRecorder {
     /// `@Observable`은 오디오 콜백이 갱신하는 값을 추적할 수 없다(메인 액터 밖에서
     /// 초당 수십 번 바뀐다). 그래서 UI가 `TimelineView`로 주기적으로 당겨 읽는다.
     func inputLevel(for speaker: Speaker) -> InputLevel? {
-        let tracker: AudioLevelTracker? = switch speaker {
-        case .me: microphone?.level
-        case .remote: systemAudio?.level
-        }
-        guard let tracker, activeSources.contains(speaker) else { return nil }
-        return InputLevel(meter: tracker.meterValue, decibels: tracker.decibels)
+        guard let capture = capture(for: speaker) else { return nil }
+        return InputLevel(meter: capture.level.meterValue, decibels: capture.level.decibels)
     }
 
-    struct InputLevel {
-        /// 0...1로 정규화된 미터 값 (dBFS 기반).
-        let meter: Float
-        /// 사람이 읽는 dBFS. 레벨이 적정한지 판단할 근거.
-        let decibels: Float
-
-        /// 녹음 레벨 진단.
-        ///
-        /// 음성 녹음의 통상 권장치는 피크 -12~-6 dBFS다. 그보다 훨씬 낮으면
-        /// 전사는 되더라도 나중에 사람이 듣거나 재처리할 때 아쉽다.
-        enum Quality {
-            case silent
-            case tooQuiet
-            case good
-            case tooLoud
-        }
-
-        var quality: Quality {
-            switch decibels {
-            case ..<(-50): .silent
-            case ..<(-24): .tooQuiet
-            case ..<(-3): .good
-            default: .tooLoud
-            }
+    /// 살아 있는 소스의 레벨 원천. 켜지지 않은 소스는 nil이다.
+    ///
+    /// 두 캡처는 여는 방식만 다르고 레벨을 같은 형태로 노출하므로, 진단은 소스를
+    /// 구분하지 않고 이 표 하나를 거친다.
+    private func capture(for speaker: Speaker) -> (any AudioLevelSource)? {
+        guard activeSources.contains(speaker) else { return nil }
+        return switch speaker {
+        case .me: microphone
+        case .remote: systemAudio
         }
     }
 
@@ -140,11 +113,6 @@ final class MeetingRecorder {
     /// 경계를 끊어도 캡처는 계속 흐르므로 전사기가 주는 시각은 계속 커진다.
     /// 이 값을 빼서 각 세션의 발화가 0부터 시작하게 만든다.
     private var sessionTimeOffset: TimeInterval = 0
-
-    var elapsed: TimeInterval {
-        guard let startedAt, state == .recording else { return 0 }
-        return Date().timeIntervalSince(startedAt)
-    }
 
     // MARK: - 시작
 
@@ -168,8 +136,13 @@ final class MeetingRecorder {
             }
 
             // 예약을 먼저 해야 다운로드한 모델이 정리되지 않는다.
-            try await SpeechModelInstaller.reserve(locales: locales)
+            //
+            // 해제 대상을 **예약을 시도하기 전에** 기록한다. `reserve`는 로케일을 하나씩
+            // 잡다가 한도를 넘으면 던지므로, 성공 후에 기록하면 이미 잡힌 로케일이
+            // teardown의 해제 대상에서 빠져 그대로 붙잡힌 채 남는다. 다음 실행은 한도를
+            // 더 빨리 만나고, 앱을 다시 켜야 풀린다.
             reservedLocales = locales
+            try await SpeechModelInstaller.reserve(locales: locales)
 
             let modules = await sessions[.me]!.modules
             try await SpeechModelInstaller.ensureModels(for: modules) { [weak self] fraction in

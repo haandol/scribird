@@ -151,17 +151,17 @@ struct TranscriptView: View {
         TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { _ in
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 14) {
-                    sourceMeter(.me, warning: recorder.microphoneIsSilent)
-                    sourceMeter(.remote, warning: recorder.systemAudioIsSilent)
+                    sourceMeter(.me, warning: recorder.isSilent(.me))
+                    sourceMeter(.remote, warning: recorder.isSilent(.remote))
                     Spacer()
                 }
 
-                if recorder.microphoneIsSilent {
+                if recorder.isSilent(.me) {
                     inlineNotice(
                         "마이크에서 소리가 들어오지 않습니다. 권한이 거부됐거나 입력 장치가 음소거일 수 있습니다.",
                         systemImage: "mic.slash.fill",
                         tint: .orange,
-                        action: ("마이크 설정 열기", "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                        action: ("마이크 설정 열기", .microphonePrivacy)
                     )
                 } else if recorder.microphoneIsTooQuiet {
                     // 전사는 되지만 저장된 음성이 너무 작아 나중에 듣기 어려운 상태.
@@ -169,18 +169,18 @@ struct TranscriptView: View {
                         "녹음 레벨이 낮습니다. 마이크에 더 가까이 말하거나 시스템 설정 > 사운드에서 입력 볼륨을 올려 주세요.",
                         systemImage: "waveform.badge.exclamationmark",
                         tint: .orange,
-                        action: ("사운드 설정 열기", "x-apple.systempreferences:com.apple.preference.sound?input")
+                        action: ("사운드 설정 열기", .soundInput)
                     )
                 }
 
-                if recorder.systemAudioIsSilent {
+                if recorder.isSilent(.remote) {
                     // Core Audio는 권한이 없어도 오류 없이 무음을 흘려보낸다.
                     // 조용히 실패하게 두면 회의가 끝난 뒤에야 알게 된다.
                     inlineNotice(
                         "시스템 오디오가 무음입니다. 재생 중인 소리가 없거나, 시스템 설정 > 개인정보 보호 및 보안 > 오디오 녹음에서 Scribird가 허용되지 않았을 수 있습니다.",
                         systemImage: "speaker.slash.fill",
                         tint: .orange,
-                        action: ("오디오 녹음 설정 열기", "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
+                        action: ("오디오 녹음 설정 열기", .audioCapturePrivacy)
                     )
                 }
 
@@ -189,7 +189,7 @@ struct TranscriptView: View {
                         warning,
                         systemImage: "exclamationmark.triangle.fill",
                         tint: .orange,
-                        action: ("개인정보 설정 열기", "x-apple.systempreferences:com.apple.preference.security?Privacy")
+                        action: ("개인정보 설정 열기", .privacyRoot)
                     )
                 }
             }
@@ -227,7 +227,7 @@ struct TranscriptView: View {
                      : "—")
                     .font(.system(size: 9, weight: .medium))
                     .monospacedDigit()
-                    .foregroundStyle(Self.qualityColor(level.quality))
+                    .foregroundStyle(level.quality.color)
                     .frame(width: 42, alignment: .leading)
             } else {
                 Text("꺼짐")
@@ -237,20 +237,11 @@ struct TranscriptView: View {
         }
     }
 
-    static func qualityColor(_ quality: MeetingRecorder.InputLevel.Quality) -> Color {
-        switch quality {
-        case .silent: .secondary
-        case .tooQuiet: .orange
-        case .good: .green
-        case .tooLoud: .red
-        }
-    }
-
     private func inlineNotice(
         _ message: String,
         systemImage: String,
         tint: Color,
-        action: (label: String, url: String)?
+        action: (label: String, pane: SystemSettingsPane)?
     ) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: systemImage)
@@ -261,11 +252,9 @@ struct TranscriptView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let action {
-                Button(action.label) {
-                    if let url = URL(string: action.url) { NSWorkspace.shared.open(url) }
-                }
-                .buttonStyle(.link)
-                .font(.system(size: 10))
+                Button(action.label) { action.pane.open() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 10))
             }
         }
     }
@@ -343,10 +332,10 @@ struct TranscriptView: View {
                 if message.contains("권한") {
                     let isMicrophone = message.contains("마이크")
                     Button(isMicrophone ? "마이크 설정 열기" : "오디오 녹음 설정 열기") {
-                        let pane = isMicrophone ? "Privacy_Microphone" : "Privacy_AudioCapture"
-                        NSWorkspace.shared.open(
-                            URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!
-                        )
+                        let pane: SystemSettingsPane = isMicrophone
+                            ? .microphonePrivacy
+                            : .audioCapturePrivacy
+                        pane.open()
                     }
                 }
                 if let directory = recorder.lastSessionDirectory {
@@ -415,13 +404,25 @@ struct TranscriptView: View {
     }
 }
 
+extension InputLevel.Quality {
+    /// 진단을 색으로 옮긴다. 미터 바와 dB 숫자가 같은 색을 써야 한 상태로 읽힌다.
+    var color: Color {
+        switch self {
+        case .silent: .secondary
+        case .tooQuiet: .orange
+        case .good: .green
+        case .tooLoud: .red
+        }
+    }
+}
+
 /// 입력 레벨 바.
 ///
 /// 눈금에 권장 구간(-24~-3 dBFS)을 표시해서, 바가 어디쯤 있어야 적정한지
 /// 알 수 있게 한다. 숫자만으로는 "-40dB가 낮은 건가?"를 판단하기 어렵다.
 private struct LevelBar: View {
     let value: Float
-    let quality: MeetingRecorder.InputLevel.Quality
+    let quality: InputLevel.Quality
 
     /// -60dBFS를 0, 0dBFS를 1로 놓은 눈금에서 권장 구간의 경계.
     ///
@@ -444,7 +445,7 @@ private struct LevelBar: View {
                     .offset(x: width * goodZoneStart)
 
                 Capsule()
-                    .fill(TranscriptView.qualityColor(quality))
+                    .fill(quality.color)
                     .frame(width: max(2, width * Double(value)))
             }
         }

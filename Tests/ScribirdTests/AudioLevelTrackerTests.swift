@@ -218,16 +218,18 @@ final class AudioLevelTrackerTests: XCTestCase {
         XCTAssertEqual(AudioLevelTracker().averageDecibels, -.infinity)
     }
 
-    // MARK: - 리셋
+    // MARK: - 세션 경계
 
-    func test_reset_clearsAllThreeValues() {
+    /// 추적기는 세션마다 새로 만들어진다 — 값을 되돌리는 경로는 두지 않는다.
+    ///
+    /// 캡처 객체가 `start()`마다 새로 생기고 추적기를 함께 데려오므로, 이전 세션의
+    /// 표본이 다음 세션으로 넘어올 통로가 없다. 갓 만든 추적기가 비어 있다는 것이
+    /// 그 전제다.
+    func test_freshTracker_carriesNoSamples() {
         let tracker = AudioLevelTracker()
-        for _ in 0..<100 { tracker.submit(peak: 0.5) }
-
-        tracker.reset()
 
         XCTAssertEqual(tracker.recentLevel, 0)
         XCTAssertEqual(tracker.sessionPeak, 0)
-        XCTAssertFalse(tracker.hasEnoughSamples, "이전 세션 표본이 남았다")
+        XCTAssertFalse(tracker.hasEnoughSamples)
     }
 }

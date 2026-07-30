@@ -82,7 +82,7 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `open build/Scribird.app`: run the locally built bundle.
 - `./install.sh`: release-build and replace `/Applications/Scribird.app`; restart an
   already running copy for the new build to take effect.
-- `swift test`: run the unit test suite (158 tests, no hardware or network required).
+- `swift test`: run the unit test suite (188 tests, no hardware or network required).
 
 Run the app as a bundle rather than as a bare executable, because macOS ties microphone
 and audio-capture permissions (TCC) to the bundle identifier.

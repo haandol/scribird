@@ -1,6 +1,5 @@
 import AVFoundation
 import CoreAudio
-import CoreMedia
 import Foundation
 import Speech
 
@@ -23,7 +22,7 @@ import Speech
 ///
 /// 구조: 탭을 만들고 → 그 탭을 품은 비공개 aggregate device를 만들고 →
 /// 그 장치에 IO 프로시저를 붙여 샘플을 받는다.
-final class SystemAudioCapture: @unchecked Sendable {
+final class SystemAudioCapture: AudioLevelSource, @unchecked Sendable {
     enum CaptureError: LocalizedError {
         case unsupportedOS
         case noOutputDevice
@@ -53,37 +52,33 @@ final class SystemAudioCapture: @unchecked Sendable {
         }
     }
 
-    private let targetFormat: AVAudioFormat
-    private let audioRecorder: AudioRecorder?
+    private let pump: AnalyzerInputPump
 
     private let lock = NSLock()
-    private var continuation: AsyncStream<AnalyzerInput>.Continuation?
-    private var converter: AudioStreamConverter?
+    /// 탭이 내보내는 포맷. 콜백이 주는 `AudioBufferList`를 감쌀 때 필요하다.
     private var tapFormat: AVAudioFormat?
-    private var framesSent: AVAudioFramePosition = 0
-
-    /// 입력 레벨. 미터 표시와 무음 감지에 함께 쓴다.
-    let level = AudioLevelTracker()
 
     private var tapID: AudioObjectID = .zero
     private var aggregateID: AudioObjectID = .zero
     private var ioProcID: AudioDeviceIOProcID?
 
     init(targetFormat: AVAudioFormat, audioRecorder: AudioRecorder?) {
-        self.targetFormat = targetFormat
-        self.audioRecorder = audioRecorder
+        self.pump = AnalyzerInputPump(
+            speaker: .remote,
+            targetFormat: targetFormat,
+            audioRecorder: audioRecorder
+        )
     }
 
     func makeInputStream() -> AsyncStream<AnalyzerInput> {
-        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream(
-            bufferingPolicy: .bufferingNewest(256)
-        )
-        lock.withLock { self.continuation = continuation }
-        return stream
+        pump.makeInputStream()
     }
 
+    /// 입력 레벨. 미터 표시와 무음 감지에 함께 쓴다.
+    var level: AudioLevelTracker { pump.level }
+
     /// 세션 전체 최대 진폭. 0에 가까우면 재생 중인 소리가 없거나 권한이 없다는 뜻.
-    var peakLevel: Float { level.sessionPeak }
+    var peakLevel: Float { pump.peakLevel }
 
     func start() throws {
         guard #available(macOS 14.4, *) else { throw CaptureError.unsupportedOS }
@@ -122,11 +117,8 @@ final class SystemAudioCapture: @unchecked Sendable {
 
             // 3) 탭의 실제 오디오 포맷을 읽어 변환기를 준비한다.
             let format = try Self.tapStreamFormat(tapID: tap)
-            lock.withLock {
-                tapFormat = format
-                converter = AudioStreamConverter(from: format, to: targetFormat)
-            }
-            guard lock.withLock({ converter }) != nil else {
+            lock.withLock { tapFormat = format }
+            guard pump.prepare(sourceFormat: format) else {
                 throw CaptureError.formatUnavailable
             }
 
@@ -157,12 +149,7 @@ final class SystemAudioCapture: @unchecked Sendable {
 
     func stop() {
         teardownResources()
-        let continuation = lock.withLock {
-            let current = self.continuation
-            self.continuation = nil
-            return current
-        }
-        continuation?.finish()
+        pump.finish()
     }
 
     private func teardownResources() {
@@ -189,36 +176,17 @@ final class SystemAudioCapture: @unchecked Sendable {
     // MARK: - 오디오 콜백
 
     private func handle(_ inputData: UnsafePointer<AudioBufferList>) {
-        lock.lock()
-        guard let format = tapFormat,
-              let converter = self.converter,
-              let continuation = self.continuation
-        else { lock.unlock(); return }
-        let startFrame = framesSent
-        lock.unlock()
+        guard let format = lock.withLock({ tapFormat }) else { return }
 
         // AudioBufferList를 AVAudioPCMBuffer로 감싼다. 이 포인터는 콜백 안에서만
         // 유효하므로 여기서 바로 변환하고 복사까지 끝낸다.
+        // 탭은 Float32 인터리브로 오는데, 그 배치 구분은 아래 처리 안에서 이뤄진다.
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: format,
             bufferListNoCopy: inputData
-        ), buffer.frameLength > 0 else { return }
+        ) else { return }
 
-        // 원본 저장은 리샘플링 전에 한다.
-        audioRecorder?.write(buffer, for: .remote)
-
-        // 탭은 Float32 인터리브로 온다. peakAmplitude()가 배치를 구분해 읽는다.
-        level.submit(peak: buffer.peakAmplitude())
-
-        guard let converted = converter.convert(buffer) else { return }
-
-        let startTime = CMTime(
-            value: startFrame,
-            timescale: CMTimeScale(targetFormat.sampleRate)
-        )
-        lock.withLock { framesSent += AVAudioFramePosition(converted.frameLength) }
-
-        continuation.yield(AnalyzerInput(buffer: converted, bufferStartTime: startTime))
+        pump.submit(buffer)
     }
 
     // MARK: - Core Audio 헬퍼
