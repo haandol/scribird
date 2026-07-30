@@ -12,7 +12,7 @@ happens on-device; nothing leaves the machine. Application code lives under
   and multilingual arbitration.
 - `Transcript/`: speaker and segment models, timeline merging, and JSONL/Markdown
   persistence.
-- `UI/`: the SwiftUI menu-bar window.
+- `UI/`: the SwiftUI transcript view, the floating window, and global-hotkey registration.
 - `MeetingRecorder.swift`: application state and pipeline orchestration.
 
 Bundle metadata, entitlements, and the editable app icon are in `Resources/`. Generated
@@ -47,6 +47,17 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - **Arbitrate multilingual results per token, not per segment.** Segment-level comparison
   deletes whole utterances in code-switching meetings. See `LanguageArbiter` for the three
   rules and the measured failure cases behind them.
+- **A session boundary must not stop capture.** Rotating to a new session keeps both
+  capture paths running and swaps only the transcript store and audio sinks. Stopping and
+  restarting instead would re-enter the model-provisioning gate and lose the opening of
+  the next meeting. Rebase segment timings onto the new session before arbitration, or
+  the arbiter's regions drift out of step with the segment ranges.
+- **Close audio containers when rotating.** `AudioRecorder.rotate` must finish the old
+  sinks before pointing at the new directory. Reusing the file handle across the boundary
+  leaves the previous meeting's `.m4a` unfinalized — bytes on disk that will not open.
+- **Use Carbon `RegisterEventHotKey` for the global shortcut.** An `NSEvent` global
+  monitor requires accessibility permission (`kTCCServiceAccessibility`), which breaks the
+  rule that this app asks only for microphone and audio capture.
 - **Do not weaken Swift 6 concurrency checking** to resolve a data-race diagnostic.
   Audio callbacks run off the main actor; use the existing lock/handoff patterns.
 
@@ -57,7 +68,7 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `open build/Scribird.app`: run the locally built bundle.
 - `./install.sh`: release-build and replace `/Applications/Scribird.app`; restart an
   already running copy for the new build to take effect.
-- `swift test`: run the unit test suite (106 tests, no hardware required).
+- `swift test`: run the unit test suite (128 tests, no hardware required).
 
 Run the app as a bundle rather than as a bare executable, because macOS ties microphone
 and audio-capture permissions (TCC) to the bundle identifier.
@@ -108,6 +119,17 @@ build and install the bundle, start a recording, confirm both level meters move,
 play remote audio, then stop and verify `transcript.jsonl`, `transcript.md`, `me.m4a`, and
 `remote.m4a` in `~/Documents/Scribird/<date_time>/`. Verify that the `.m4a` files actually
 open — a container that was never finalized still has bytes on disk.
+
+Session rotation and the global hotkey also need that manual pass, since neither the
+Carbon event target nor a live capture rotation exists under `swift test`:
+
+- While recording, press the new-session button, keep speaking, then stop. Two session
+  directories must exist, each with a playable `.m4a` and a `transcript.md` whose
+  timecodes start near `00:00:00` — a second meeting starting at `01:02:05` means the
+  time rebase was lost.
+- Press the hotkey from another frontmost app, click that app, and confirm the transcript
+  window stays visible. Then set a combination already taken by another app and confirm
+  the footer reports the failure instead of failing silently.
 
 ## Commit & Pull Request Guidelines
 

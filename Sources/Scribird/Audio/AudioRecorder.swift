@@ -38,7 +38,7 @@ final class AudioRecorder: @unchecked Sendable {
         let captureFormat: AVAudioFormat
     }
 
-    private let directory: URL
+    private var directory: URL
     private let queue = DispatchQueue(label: "com.scribird.recorder.write", qos: .utility)
     private let lock = NSLock()
     private var sinks: [Speaker: Sink] = [:]
@@ -121,6 +121,8 @@ final class AudioRecorder: @unchecked Sendable {
     }
 
     private func makeSink(captureFormat: AVAudioFormat, speaker: Speaker) throws -> Sink {
+        // 경계에서 디렉터리가 바뀔 수 있으므로 락 안에서 읽는다.
+        let directory = lock.withLock { self.directory }
         let url = directory.appending(path: "\(speaker.rawValue).\(Self.fileExtension)")
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -152,6 +154,23 @@ final class AudioRecorder: @unchecked Sendable {
             to: sink.file.processingFormat
         ) else { return nil }
         return Sink(file: sink.file, converter: converter, captureFormat: captureFormat)
+    }
+
+    /// 지금까지의 파일을 마무리하고, 이후 버퍼를 새 디렉터리에 쓰기 시작한다.
+    ///
+    /// 세션 경계에서 쓰인다. 캡처는 끊기지 않으므로 콜백은 계속 들어오는데, 그
+    /// 버퍼가 가야 할 파일만 바뀐다. 실패한 소스 표시와 누적 오류도 함께 비워
+    /// 새 세션이 이전 세션의 실패를 물려받지 않게 한다.
+    ///
+    /// - Returns: 닫힌 세션의 재생 가능한 오디오 파일 경로들.
+    func rotate(to newDirectory: URL) -> [URL] {
+        let finished = finish()
+        lock.withLock {
+            directory = newDirectory
+            failedSpeakers.removeAll()
+            lastError = nil
+        }
+        return finished
     }
 
     /// 큐에 남은 쓰기를 모두 끝내고 파일을 닫는다.

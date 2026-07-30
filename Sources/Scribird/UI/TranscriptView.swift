@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// 메뉴바 팝오버 본문. 실시간 트랜스크립트가 아래로 흐른다.
+/// 전사 화면 본문. 실시간 트랜스크립트가 아래로 흐른다.
+///
+/// 메뉴바 팝오버와 떠 있는 창이 같은 뷰를 쓴다 — 도달 경로가 둘이어도 내용은 하나다.
 struct TranscriptView: View {
     let recorder: MeetingRecorder
+    let hotKeySettings: HotKeySettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,6 +52,20 @@ struct TranscriptView: View {
             .frame(width: 140)
             // 세션 중 언어를 바꾸면 이미 만든 전사기와 어긋난다.
             .disabled(recorder.state.isBusy)
+
+            // 회의가 바뀔 때 산출물을 끊는다. 녹취 중에도 캡처를 끊지 않고 넘어가므로
+            // 다음 회의 도입부를 놓치지 않는다.
+            Button {
+                Task { await recorder.startNewSession() }
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .help(recorder.state == .recording
+                  ? "현재 회의록을 저장하고 새 회의록으로 이어서 기록합니다"
+                  : "화면을 비우고 새 회의록을 준비합니다")
+            .disabled(isTransitioning || !canStartNewSession)
 
             Button {
                 Task { await recorder.toggle() }
@@ -118,6 +135,11 @@ struct TranscriptView: View {
         case .preparingModel, .stopping: true
         default: false
         }
+    }
+
+    /// 끊을 것이 없으면 비활성화한다. 대기 상태에서 빈 화면을 또 비울 이유가 없다.
+    private var canStartNewSession: Bool {
+        recorder.state == .recording || !recorder.segments.isEmpty
     }
 
     // MARK: - 소스 상태
@@ -344,40 +366,127 @@ struct TranscriptView: View {
     // MARK: - 푸터
 
     private var footer: some View {
-        HStack(spacing: 12) {
-            Toggle("음성 원본 저장", isOn: Binding(
-                get: { recorder.savesAudio },
-                set: { recorder.savesAudio = $0 }
-            ))
-            .toggleStyle(.checkbox)
-            // 녹취 중에 바꿔도 이번 세션에는 반영되지 않으므로 잠근다.
-            .disabled(recorder.state.isBusy)
+        VStack(alignment: .leading, spacing: 6) {
+            // 단축키 등록 실패는 조용히 넘기지 않는다. 알리지 않으면 사용자는
+            // 단축키를 눌러 보고 앱이 고장 났다고 판단한다.
+            if let error = hotKeySettings.registrationError {
+                inlineNotice(
+                    error,
+                    systemImage: "keyboard.badge.exclamationmark",
+                    tint: .orange,
+                    action: nil
+                )
+            }
 
-            if let directory = recorder.lastSessionDirectory {
+            HStack(spacing: 12) {
+                Toggle("음성 원본 저장", isOn: Binding(
+                    get: { recorder.savesAudio },
+                    set: { recorder.savesAudio = $0 }
+                ))
+                .toggleStyle(.checkbox)
+                // 녹취 중에 바꿔도 이번 세션에는 반영되지 않으므로 잠근다.
+                .disabled(recorder.state.isBusy)
+
+                ShortcutField(settings: hotKeySettings)
+
+                if let directory = recorder.lastSessionDirectory {
+                    Button {
+                        NSWorkspace.shared.open(directory)
+                    } label: {
+                        Label("저장 폴더 열기", systemImage: "folder")
+                    }
+                    .buttonStyle(.link)
+                }
+
+                Spacer()
+
+                Text("\(recorder.segments.count)개 발화")
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+
                 Button {
-                    NSWorkspace.shared.open(directory)
+                    NSApplication.shared.terminate(nil)
                 } label: {
-                    Label("저장 폴더 열기", systemImage: "folder")
+                    Label("종료", systemImage: "power")
                 }
                 .buttonStyle(.link)
             }
-
-            Spacer()
-
-            Text("\(recorder.segments.count)개 발화")
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
-
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Label("종료", systemImage: "power")
-            }
-            .buttonStyle(.link)
         }
         .font(.system(size: 11))
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
+    }
+}
+
+/// 전역 단축키를 눌러서 바꾸는 필드.
+///
+/// 조합을 목록에서 고르게 하지 않고 직접 누르게 한다 — 어떤 조합이 비어 있는지는
+/// 사용자 환경마다 다르므로, 눌러 보고 등록 실패를 즉시 확인하는 편이 빠르다.
+private struct ShortcutField: View {
+    let settings: HotKeySettings
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "macwindow.on.rectangle")
+                .foregroundStyle(.secondary)
+            Button(settings.isRecording ? "키를 누르세요" : settings.shortcut.displayName) {
+                settings.isRecording.toggle()
+            }
+            .buttonStyle(.bordered)
+            .monospaced()
+            .help("전사 창을 띄우는 전역 단축키")
+            .background {
+                if settings.isRecording {
+                    ShortcutRecorder { shortcut in
+                        settings.update(to: shortcut)
+                        settings.isRecording = false
+                    }
+                }
+            }
+
+            if settings.shortcut != .default {
+                Button("기본값") { settings.resetToDefault() }
+                    .buttonStyle(.link)
+            }
+        }
+    }
+}
+
+/// 다음 키 입력 한 번을 받아 단축키로 넘긴다.
+///
+/// SwiftUI에는 수정자 조합을 그대로 읽는 수단이 없어 `NSView`의 키 이벤트를 쓴다.
+private struct ShortcutRecorder: NSViewRepresentable {
+    let onCapture: (HotKeyShortcut) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = KeyCaptureView()
+        view.onCapture = onCapture
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? KeyCaptureView)?.onCapture = onCapture
+    }
+
+    private final class KeyCaptureView: NSView {
+        var onCapture: ((HotKeyShortcut) -> Void)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.makeFirstResponder(self)
+        }
+
+        override func keyDown(with event: NSEvent) {
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            onCapture?(
+                HotKeyShortcut(
+                    keyCode: UInt32(event.keyCode),
+                    modifiers: modifiers.intersection([.command, .option, .shift, .control])
+                )
+            )
+        }
     }
 }
 

@@ -66,6 +66,33 @@ struct TranscriptSegment: Identifiable, Sendable {
     var start: TimeInterval { range.start.seconds }
     var end: TimeInterval { range.end.seconds }
 
+    /// 시간축을 통째로 옮긴다.
+    ///
+    /// 세션 경계를 끊어도 캡처는 계속 흐르므로, 전사기가 주는 시각은 캡처를 시작한
+    /// 시점 기준으로 계속 커진다. 새 세션의 회의록은 그 회의만의 문서여야 하므로
+    /// 경계 시점을 0으로 되돌려 담는다.
+    ///
+    /// 경계를 발화 도중에 끊으면 시작이 음수가 되는데, 그 발화는 이미 이전 세션에
+    /// 기록됐으므로 0으로 눌러 새 세션의 첫 발화로 둔다.
+    func shiftingTime(by delta: TimeInterval) -> TranscriptSegment {
+        TranscriptSegment(
+            id: id,
+            speaker: speaker,
+            range: range.shiftedClampingToZero(by: delta),
+            text: text,
+            isFinal: isFinal,
+            confidence: confidence,
+            localeIdentifier: localeIdentifier,
+            tokens: tokens.map {
+                Token(
+                    text: $0.text,
+                    range: $0.range.shiftedClampingToZero(by: delta),
+                    confidence: $0.confidence
+                )
+            }
+        )
+    }
+
     /// 잠정 결과가 확정될 때 텍스트만 갈아끼운다. id를 유지해서 SwiftUI가
     /// 행을 지우고 새로 만드는 대신 제자리에서 갱신하게 한다.
     func replacingText(
@@ -108,6 +135,23 @@ extension TranscriptSegment {
             text: text,
             confidence: confidence,
             locale: localeIdentifier
+        )
+    }
+}
+
+extension CMTimeRange {
+    /// 구간을 앞으로 당기되 음수 구간은 0에서 자른다.
+    func shiftedClampingToZero(by delta: TimeInterval) -> CMTimeRange {
+        let offset = CMTime(seconds: delta, preferredTimescale: start.timescale)
+        let shiftedStart = start - offset
+        guard shiftedStart < .zero else {
+            return CMTimeRange(start: shiftedStart, duration: duration)
+        }
+        // 경계 이전으로 넘어간 만큼은 이미 이전 세션의 몫이다. 남은 부분만 0부터 센다.
+        let remaining = duration + shiftedStart
+        return CMTimeRange(
+            start: .zero,
+            duration: remaining > .zero ? remaining : .zero
         )
     }
 }

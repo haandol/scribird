@@ -135,6 +135,11 @@ final class MeetingRecorder {
     private var audioRecorder: AudioRecorder?
     private var runTasks: [Task<Void, Never>] = []
     private var reservedLocales: [Locale] = []
+    /// 캡처 시작 이후 지나온 세션 경계의 누적 길이(초).
+    ///
+    /// 경계를 끊어도 캡처는 계속 흐르므로 전사기가 주는 시각은 계속 커진다.
+    /// 이 값을 빼서 각 세션의 발화가 0부터 시작하게 만든다.
+    private var sessionTimeOffset: TimeInterval = 0
 
     var elapsed: TimeInterval {
         guard let startedAt, state == .recording else { return 0 }
@@ -150,6 +155,7 @@ final class MeetingRecorder {
         segments = []
         activeSources = []
         sourceWarning = nil
+        sessionTimeOffset = 0
 
         do {
             let locales = try await SpeechModelInstaller.resolveLocales(language.locales)
@@ -356,6 +362,66 @@ final class MeetingRecorder {
         }
     }
 
+    // MARK: - 세션 경계
+
+    /// 녹취를 유지한 채 현재 세션을 닫고 새 세션을 연다.
+    ///
+    /// 하루 종일 켜 두면 서로 다른 회의의 발화가 한 산출물에 쌓인다. 회의록의
+    /// 소비 단위는 회의 하나이므로 사용자가 그 경계를 끊을 수 있어야 한다.
+    ///
+    /// **캡처는 끊지 않는다.** 중지하고 다시 시작하면 언어 모델 확보 단계를 다시
+    /// 통과하는 동안 오디오가 어느 세션에도 기록되지 않아 회의 도입부를 놓친다.
+    /// 캡처를 유지하면 바뀌는 것은 발화가 기록될 산출물뿐이다.
+    func startNewSession() async {
+        switch state {
+        case .recording:
+            await rotateWhileRecording()
+        case .idle, .failed:
+            // 대기 중에는 화면만 비운다. 다음 시작이 새 산출물을 만든다.
+            timeline.reset()
+            segments = []
+            sourceWarning = nil
+            dismissError()
+        case .preparingModel, .stopping:
+            break
+        }
+    }
+
+    /// 녹취 중에 세션을 갈아 끼운다.
+    private func rotateWhileRecording() async {
+        // 경계 시점을 먼저 확정한다. 이후 도착하는 발화는 새 세션의 몫이다.
+        let boundary = Date()
+        let previousStore = store
+        let previousStart = startedAt
+
+        // 중재 대기 중인 후보를 확정해야 이전 세션의 시간축이 완전해진다.
+        for arbiter in arbiters.values {
+            arbiter.flush()
+        }
+        // 확정되지 못한 발화도 이전 세션에 남긴다 — 불완전한 발화가 누락보다 낫다.
+        for segment in timeline.flushPending() {
+            await previousStore?.append(segment)
+        }
+
+        do {
+            let store = try TranscriptStore(startedAt: boundary)
+            // 오디오도 같은 경계에서 갈아 끼운다. 컨테이너를 닫아야 파일이 열린다.
+            let audioFiles = audioRecorder?.rotate(to: store.sessionDirectory) ?? []
+            lastSessionDirectory = await previousStore?.finalize(audioFiles: audioFiles)
+
+            self.store = store
+            // 발화 시각은 새 세션 안에서 0부터 세어야 그 회의만의 회의록이 된다.
+            sessionTimeOffset += previousStart.map { boundary.timeIntervalSince($0) } ?? 0
+            startedAt = boundary
+            timeline.reset()
+            segments = []
+        } catch {
+            // 새 산출물을 열지 못하면 경계를 넘지 않는다. 이전 세션에 계속 기록하는
+            // 편이 녹취를 잃는 것보다 낫다.
+            sourceWarning = "새 세션을 시작하지 못해 현재 회의록에 계속 기록합니다: \(error.localizedDescription)"
+        }
+    }
+
     func dismissError() {
         if case .failed = state { state = .idle }
     }
@@ -363,7 +429,15 @@ final class MeetingRecorder {
     // MARK: - 내부
 
     /// 전사기에서 갓 나온 결과를 받는다. 다국어면 중재를 거친다.
-    private func handle(_ segment: TranscriptSegment) {
+    private func handle(_ raw: TranscriptSegment) {
+        guard !isAlreadyRecordedBeforeBoundary(raw) else { return }
+
+        // 세션 경계를 지났으면 시간축을 현재 세션 기준으로 옮긴다. 중재보다 먼저
+        // 옮겨야 중재기가 들고 있는 후보와 시간축이 어긋나지 않는다.
+        let segment = sessionTimeOffset > 0
+            ? raw.shiftingTime(by: sessionTimeOffset)
+            : raw
+
         guard let arbiter = arbiters[segment.speaker] else {
             commit(segment)
             return
@@ -373,6 +447,23 @@ final class MeetingRecorder {
         if let passthrough = arbiter.submit(segment) {
             commit(passthrough)
         }
+    }
+
+    /// 경계 이전 오디오의 결과가 뒤늦게 도착한 것인지.
+    ///
+    /// 경계에서 중재 대기분과 미확정 발화를 이전 세션에 확정해 넣는다. 그런데 전사기는
+    /// 그 뒤에도 같은 구간의 확정 결과를 보내므로, 걸러내지 않으면 같은 말이 두 회의록에
+    /// 모두 남는다. 경계 이전에서 끝난 결과만 버린다 — 경계에 걸친 발화는 뒷부분이
+    /// 새 세션의 내용이므로 살린다.
+    private func isAlreadyRecordedBeforeBoundary(_ segment: TranscriptSegment) -> Bool {
+        Self.isAlreadyRecorded(segment, boundaryAt: sessionTimeOffset)
+    }
+
+    static func isAlreadyRecorded(
+        _ segment: TranscriptSegment,
+        boundaryAt boundary: TimeInterval
+    ) -> Bool {
+        boundary > 0 && segment.end <= boundary
     }
 
     /// 채택이 끝난 세그먼트를 타임라인과 디스크에 반영한다.
@@ -396,6 +487,7 @@ final class MeetingRecorder {
         store = nil
         audioRecorder = nil
         startedAt = nil
+        sessionTimeOffset = 0
         if !reservedLocales.isEmpty {
             await SpeechModelInstaller.release(locales: reservedLocales)
             reservedLocales = []

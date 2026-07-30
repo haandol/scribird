@@ -50,6 +50,23 @@
       ],
       "dependsOn": ["capture"]
     },
+    "session": {
+      "feature": "녹취 세션 경계와 화면 접근",
+      "subdomainType": "core",
+      "adrs": [
+        {
+          "path": "docs/adr/session/0001-session-boundary-control.md",
+          "status": "Proposed",
+          "summary": "캡처를 끊지 않고 세션 경계를 끊어 회의 단위로 산출물을 나눈다"
+        },
+        {
+          "path": "docs/adr/session/0002-global-hotkey-floating-window.md",
+          "status": "Proposed",
+          "summary": "전역 단축키(기본 ⌥⌘S, 변경 가능)로 포커스를 잃어도 닫히지 않는 전사 창을 띄운다"
+        }
+      ],
+      "dependsOn": ["capture", "transcription", "archive"]
+    },
     "archive": {
       "feature": "회의록과 원본 오디오 보관",
       "subdomainType": "supporting",
