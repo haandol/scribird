@@ -40,10 +40,12 @@ struct ScribirdApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let recorder = MeetingRecorder()
     let hotKeySettings = HotKeySettings()
+    let settingsHotKeySettings = SettingsHotKeySettings()
     let updateChecker = UpdateChecker()
     lazy var windows = WindowCoordinator(
         recorder: recorder,
         hotKeySettings: hotKeySettings,
+        settingsHotKeySettings: settingsHotKeySettings,
         updateChecker: updateChecker
     )
 
@@ -66,18 +68,21 @@ final class WindowCoordinator {
     init(
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
+        settingsHotKeySettings: SettingsHotKeySettings,
         updateChecker: UpdateChecker
     ) {
         self.hotKeySettings = hotKeySettings
         self.settingsWindow = SettingsWindow(
             recorder: recorder,
             hotKeySettings: hotKeySettings,
+            settingsHotKeySettings: settingsHotKeySettings,
             updateChecker: updateChecker
         )
         let settings = settingsWindow
         self.transcriptWindow = FloatingTranscriptWindow(
             recorder: recorder,
             settings: hotKeySettings,
+            settingsHotKey: settingsHotKeySettings,
             openSettings: { settings.show() }
         )
     }

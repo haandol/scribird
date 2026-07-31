@@ -74,7 +74,7 @@
         {
           "path": "docs/adr/session/0003-settings-surface-separation.md",
           "status": "Proposed",
-          "summary": "회의 중 보는 것만 전사 화면에 남기고 설정은 ⌘,로 여는 별도 창으로 분리한다"
+          "summary": "회의 중 보는 것만 전사 화면에 남기고 설정은 별도 창으로 분리한다 (단축키 기본 ⌘, 변경 가능)"
         },
         {
           "path": "docs/adr/session/0004-user-initiated-update-check.md",

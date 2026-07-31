@@ -387,8 +387,10 @@ struct TranscriptView: View {
                 } label: {
                     Label("설정", systemImage: "gearshape")
                 }
+                // `⌘,`는 이 버튼에 붙이지 않는다. SwiftUI의 `.keyboardShortcut`은 메뉴
+                // 시스템을 거치는데 메뉴바 전용 앱에는 메인 메뉴가 없어(실측: NSApp.mainMenu가
+                // nil) 도달하지 않는다. 떠 있는 창이 키 이벤트를 직접 받아 처리한다.
                 .buttonStyle(.link)
-                .keyboardShortcut(",", modifiers: .command)
 
                 Button {
                     NSApplication.shared.terminate(nil)

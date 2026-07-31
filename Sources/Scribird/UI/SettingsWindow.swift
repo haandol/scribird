@@ -11,15 +11,18 @@ final class SettingsWindow {
     private var window: NSWindow?
     private let recorder: MeetingRecorder
     private let hotKeySettings: HotKeySettings
+    private let settingsHotKeySettings: SettingsHotKeySettings
     private let updateChecker: UpdateChecker
 
     init(
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
+        settingsHotKeySettings: SettingsHotKeySettings,
         updateChecker: UpdateChecker
     ) {
         self.recorder = recorder
         self.hotKeySettings = hotKeySettings
+        self.settingsHotKeySettings = settingsHotKeySettings
         self.updateChecker = updateChecker
     }
 
@@ -67,6 +70,7 @@ final class SettingsWindow {
             rootView: SettingsView(
                 recorder: recorder,
                 hotKeySettings: hotKeySettings,
+                settingsHotKeySettings: settingsHotKeySettings,
                 updateChecker: updateChecker
             )
         )

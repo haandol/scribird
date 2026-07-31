@@ -8,7 +8,10 @@ import Observation
 /// 판단한다. 단축키를 못 써도 메뉴바 경로가 남아 있으므로 녹취는 막지 않는다.
 @MainActor
 @Observable
-final class HotKeySettings {
+final class HotKeySettings: ShortcutEditing {
+    /// 사용자가 아무것도 정하지 않았을 때의 조합.
+    var defaultShortcut: HotKeyShortcut { .default }
+
     private(set) var shortcut: HotKeyShortcut
     /// 등록에 실패한 사유. 성공하면 nil이다.
     private(set) var registrationError: String?

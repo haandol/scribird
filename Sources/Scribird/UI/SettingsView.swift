@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     let recorder: MeetingRecorder
     let hotKeySettings: HotKeySettings
+    let settingsHotKeySettings: SettingsHotKeySettings
     let updateChecker: UpdateChecker
 
     var body: some View {
@@ -67,6 +68,21 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 } else {
                     Text("다른 앱을 쓰는 중에도 이 조합으로 전사 창을 띄웁니다.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("설정 열기") {
+                    ShortcutField(settings: settingsHotKeySettings)
+                }
+                if let error = settingsHotKeySettings.validationError {
+                    Label(error, systemImage: "keyboard.badge.exclamationmark")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                } else {
+                    // 두 단축키의 동작 범위가 다르다는 것을 적는다. 위는 전역이고 이것은 전사
+                    // 창이 앞에 있을 때만 듣는데, 같은 자리에 나란히 있으면 구분되지 않는다.
+                    Text("전사 창이 앞에 있을 때 이 조합으로 설정을 엽니다. 다른 앱이 같은 조합을 쓰고 있으면 그 앱이 먼저 가져가므로, 그때는 조합을 바꿔 주세요.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }

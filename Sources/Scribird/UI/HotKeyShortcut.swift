@@ -117,27 +117,66 @@ struct HotKeyShortcut: Equatable, Sendable {
 }
 
 extension HotKeyShortcut {
+    /// 저장되는 단축키의 종류.
+    ///
+    /// 두 단축키는 동작 범위가 다르다 — 전사 창 띄우기는 전역이고, 설정 열기는 전사 창이 앞에
+    /// 있을 때만 듣는다. 저장 방식은 같으므로 키 이름만 나눈다.
+    enum Slot {
+        /// 전사 창을 어디서든 띄운다. Carbon으로 전역 등록한다.
+        case transcriptWindow
+        /// 설정 창을 연다. 전사 창이 앞에 있을 때만 듣는다.
+        case settingsWindow
+
+        var keyCodeKey: String {
+            switch self {
+            case .transcriptWindow: "hotKeyCode"
+            case .settingsWindow: "settingsHotKeyCode"
+            }
+        }
+
+        var modifiersKey: String {
+            switch self {
+            case .transcriptWindow: "hotKeyModifiers"
+            case .settingsWindow: "settingsHotKeyModifiers"
+            }
+        }
+
+        /// 사용자가 아무것도 정하지 않았을 때의 조합.
+        var defaultShortcut: HotKeyShortcut {
+            switch self {
+            case .transcriptWindow: .default
+            // macOS 앱의 설정 단축키 관례를 기본값으로 둔다. 다른 앱이 이 조합을 전역으로
+            // 점유하면 이 앱 안에서는 이길 수 없으므로 사용자가 바꿀 수 있어야 한다.
+            case .settingsWindow: HotKeyShortcut(
+                keyCode: UInt32(kVK_ANSI_Comma),
+                modifiers: [.command]
+            )
+            }
+        }
+    }
+
     /// 앱을 다시 켜도 사용자가 정한 조합이 유지되도록 저장한다.
     ///
     /// 저장된 값이 없으면 기본값을 쓴다 — 사용자가 아무것도 설정하지 않은 상태에서도
     /// 단축키가 바로 동작해야 한다.
-    private static let keyCodeKey = "hotKeyCode"
-    private static let modifiersKey = "hotKeyModifiers"
-
-    static func load(from defaults: UserDefaults = .standard) -> HotKeyShortcut {
-        guard defaults.object(forKey: keyCodeKey) != nil else { return .default }
+    static func load(
+        _ slot: Slot = .transcriptWindow,
+        from defaults: UserDefaults = .standard
+    ) -> HotKeyShortcut {
+        guard defaults.object(forKey: slot.keyCodeKey) != nil else { return slot.defaultShortcut }
         let shortcut = HotKeyShortcut(
-            keyCode: UInt32(defaults.integer(forKey: keyCodeKey)),
+            keyCode: UInt32(defaults.integer(forKey: slot.keyCodeKey)),
             modifiers: NSEvent.ModifierFlags(
-                rawValue: UInt(defaults.integer(forKey: modifiersKey))
+                rawValue: UInt(defaults.integer(forKey: slot.modifiersKey))
             )
         )
-        // 저장된 값이 손상됐으면 기능을 잃는 대신 기본값으로 되돌린다.
-        return shortcut.isValid ? shortcut : .default
+        // 저장된 값이 손상됐으면 기능을 잃는 대신 기본값으로 되돌린다. 설정 단축키가 이렇게
+        // 되면 설정 창에 도달할 수단이 하나 줄어드는 셈이라 특히 중요하다.
+        return shortcut.isValid ? shortcut : slot.defaultShortcut
     }
 
-    func save(to defaults: UserDefaults = .standard) {
-        defaults.set(Int(keyCode), forKey: Self.keyCodeKey)
-        defaults.set(Int(modifiers.rawValue), forKey: Self.modifiersKey)
+    func save(_ slot: Slot = .transcriptWindow, to defaults: UserDefaults = .standard) {
+        defaults.set(Int(keyCode), forKey: slot.keyCodeKey)
+        defaults.set(Int(modifiers.rawValue), forKey: slot.modifiersKey)
     }
 }
