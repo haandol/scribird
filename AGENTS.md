@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+This file is the agent-facing contract and is loaded into context every session. The
+human-facing docs cover the same ground for contributors, so keep them in step when a rule
+here changes:
+
+- [`README.md`](./README.md) — what the app does, install, usage, output layout, permissions
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — build, test, manual smoke test, commit conventions
+- [`docs/Troubleshooting.md`](./docs/Troubleshooting.md) — user-facing diagnosis by symptom
+- [`docs/adr/`](./docs/adr/) — why each decision was made, and the alternatives rejected
+
+The **Architecture Invariants** below are the part that exists nowhere else. Everything else
+in this file is duplicated in `CONTRIBUTING.md` on purpose, because an agent has this file
+and not that one.
+
 ## Project Structure & Module Organization
 
 `Scribird` is a Swift 6.2+ macOS 26 menu-bar application. All transcription and storage
@@ -56,6 +69,48 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - **Close audio containers when rotating.** `AudioRecorder.rotate` must finish the old
   sinks before pointing at the new directory. Reusing the file handle across the boundary
   leaves the previous meeting's `.m4a` unfinalized — bytes on disk that will not open.
+- **Watch the same output selector the tap targets.** macOS has two default-output
+  selectors and they move independently — setting one leaves the other unchanged
+  (measured: `sysOut=106 / defOut=94` after switching only the system-output selector).
+  Each selector's listener fires only for its own selector, so watching
+  `kAudioHardwarePropertyDefaultOutputDevice` while the tap targets
+  `DefaultSystemOutputDevice` means device-change notifications never arrive. The tap and
+  the monitor must read the selector from one shared source, and a test must assert they
+  match — the mismatch is invisible in code review and only shows up by switching a real
+  device.
+- **A device change swaps the capture, not the session.** Reconnecting keeps the pump, so
+  the transcript store, audio sinks, and frame-based timeline all continue. Rebuilding the
+  input stream instead would send the analyzer into teardown and re-enter the
+  model-provisioning gate, losing exactly the audio around the switch. Per-source
+  isolation still applies: only the affected source reconnects, and losing it does not stop
+  the other.
+- **Following the system default is the safe default; pinning is opt-in.** A user who
+  changes nothing must still have capture follow their headset. A pinned source deliberately
+  ignores default-device changes, but a pin whose device is absent falls back to the default
+  *and keeps the selection* — erasing it would lose the choice when the headset is
+  re-plugged, and refusing to fall back would keep capturing silence.
+- **Resolve a device UID by the returned device number, not the status.**
+  `kAudioHardwarePropertyTranslateUIDToDevice` returned `status=0` for a UID that does not
+  exist and handed back device `0`. Trusting the status opens capture on device zero, which
+  fails silently — the same class of lie as the tap and the listener removal below. Store the
+  UID rather than the `AudioObjectID`, which is reassigned every launch.
+- **Filter the device list by direction.** A measured machine had input-only, output-only,
+  and bidirectional devices side by side (7 devices: 3 input-only, 2 output-only, 2 both).
+  Offering an output-only device as a microphone fails the moment it's chosen. Virtual
+  devices created by meeting apps are listed on purpose — capturing only the meeting app's
+  output is a real configuration.
+- **Set the microphone's device before reading its format.** `AVAudioEngine` only uses the
+  default input, so pinning goes through the underlying audio unit. Changing the device
+  changes the channel count with it (measured: built-in 1ch → USB headset 2ch), so reading
+  the format first installs a tap in the previous device's format. Read back the property
+  after setting it — success alone isn't proof it applied.
+- **Core Audio listener removal does not take effect.**
+  `AudioObjectRemovePropertyListenerBlock` returned `status=0` and the callback still fired
+  twice on the next device switch; calling it three times in a row behaved identically, and
+  pinning the block via `@convention(block)` changed nothing. This is the same class of lie
+  as the tap returning `status=0` without permission. Gate delivery behind an explicit
+  active flag rather than trusting removal, or notifications arriving after stop will reopen
+  captures that were already torn down.
 - **Use Carbon `RegisterEventHotKey` for the global shortcut.** An `NSEvent` global
   monitor requires accessibility permission (`kTCCServiceAccessibility`), which breaks the
   rule that this app asks only for microphone and audio capture.
@@ -82,7 +137,9 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `open build/Scribird.app`: run the locally built bundle.
 - `./install.sh`: release-build and replace `/Applications/Scribird.app`; restart an
   already running copy for the new build to take effect.
-- `swift test`: run the unit test suite (188 tests, no hardware or network required).
+- `swift test`: run the unit test suite (230 tests, no network required). The device-switch
+  tests do change the real default output device and restore it; they skip themselves on a
+  machine with only one output device.
 
 Run the app as a bundle rather than as a bare executable, because macOS ties microphone
 and audio-capture permissions (TCC) to the bundle identifier.
