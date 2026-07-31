@@ -27,12 +27,6 @@ final class MeetingRecorder {
     private(set) var segments: [TranscriptSegment] = []
     private(set) var startedAt: Date?
 
-    /// 문서용 스크린샷 모드인지. 환경 변수로만 켜진다.
-    ///
-    /// 켜져 있으면 캡처·전사·저장을 시작하지 않고 화면에 보이는 값만 채운다. 실제 회의를
-    /// 녹취해 스크린샷을 찍으면 그 내용이 저장소에 들어가는데, 이 프로젝트는 녹음도 회의록도
-    /// 커밋하지 않으므로 그 경로를 쓸 수 없다.
-    private let isDemo = DemoMode.isEnabled
     /// 직전 세션이 저장된 디렉터리. 메뉴에서 "폴더 열기"에 쓴다.
     private(set) var lastSessionDirectory: URL?
 
@@ -102,8 +96,6 @@ final class MeetingRecorder {
     /// `@Observable`은 오디오 콜백이 갱신하는 값을 추적할 수 없다(메인 액터 밖에서
     /// 초당 수십 번 바뀐다). 그래서 UI가 `TimelineView`로 주기적으로 당겨 읽는다.
     func inputLevel(for speaker: Speaker) -> InputLevel? {
-        // 문서용 스크린샷 모드에서는 캡처가 없으므로 만든 값을 보여준다.
-        if isDemo { return DemoMode.inputLevel(for: speaker) }
         guard let capture = capture(for: speaker) else { return nil }
         return InputLevel(meter: capture.level.meterValue, decibels: capture.level.decibels)
     }
@@ -146,17 +138,6 @@ final class MeetingRecorder {
 
     func start() async {
         guard !state.isBusy else { return }
-
-        // 스크린샷 모드는 화면만 채운다. 권한도 요구하지 않고 파일도 만들지 않는다.
-        if isDemo {
-            segments = DemoMode.segments
-            startedAt = DemoMode.startedAt
-            activeSources = Set(Speaker.allCases)
-            sourceWarning = nil
-            state = .recording
-            return
-        }
-
         state = .preparingModel(0)
         timeline.reset()
         segments = []
@@ -345,16 +326,6 @@ final class MeetingRecorder {
 
     func stop() async {
         guard state == .recording else { return }
-
-        // 스크린샷 모드에는 마무리할 캡처도 저장할 파일도 없다.
-        if isDemo {
-            segments = []
-            startedAt = nil
-            activeSources = []
-            state = .idle
-            return
-        }
-
         state = .stopping
 
         // 감시를 캡처보다 먼저 끊는다. 남겨 두면 마무리 중에 도착한 알림이 이미 멈춘

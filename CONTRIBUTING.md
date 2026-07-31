@@ -120,32 +120,21 @@ Don't loosen the assertion to make it pass.
 
 ### Taking screenshots for the docs
 
-Recording a real meeting to get a screenshot would put that meeting's contents in the
-repository, which this project doesn't do. There's a demo mode for that instead — it fills the
-window with invented utterances and level values, and starts no capture, requests no
-permissions, and writes no files:
+Screenshots live in `docs/images/`. Take them by hand, from a real session you're willing to
+show — open the transcript window with `⌥⌘S`, get it into the state you want, then capture that
+window alone rather than cropping a full-screen shot:
 
 ```bash
-./build.sh release
-open -n build/Scribird.app --env SCRIBIRD_DEMO=1                            # transcript window
-open -n build/Scribird.app --env SCRIBIRD_DEMO=1 --env SCRIBIRD_DEMO_SETTINGS=1   # + settings
+screencapture -w -o out.png     # click the window; -o drops the drop shadow
 ```
 
-The app opens its own windows in this mode, because a menu-bar app shows no window until the
-user acts and automating that click would need accessibility permission — which this app never
-requests. Capture a specific window by its id so the shot has no desktop around it. Get the id
-from `CGWindowListCopyWindowInfo` (filter on owner name `Scribird`), then:
+**Never capture a real meeting.** Whatever is on screen ends up in the repository, and this
+project doesn't commit meeting content in any form. Say something innocuous into the mic and
+play innocuous audio for the remote side, or replace the text afterwards.
 
-```bash
-screencapture -l <window-id> -o out.png    # -o drops the drop shadow
-```
-
-Screen-recording permission for your terminal is enough for this; it's the terminal's
-permission, not the app's — Scribird still never asks for it.
-
-Screenshots live in `docs/images/`. Demo mode is enabled by an environment variable only —
-never add a settings toggle for it, or "this app doesn't fabricate meeting content" becomes a
-claim users have to verify.
+There is deliberately no fixture or demo mode for this. Code that fabricates transcript
+content has to sit in the same state machine that records real meetings, and that's a bad place
+for a switch whose whole job is to make the app show things that never happened.
 
 ### Manual smoke test
 
