@@ -111,6 +111,21 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   as the tap returning `status=0` without permission. Gate delivery behind an explicit
   active flag rather than trusting removal, or notifications arriving after stop will reopen
   captures that were already torn down.
+- **SwiftUI's `.keyboardShortcut` does nothing in this app.** It is dispatched through the
+  menu system, and a `MenuBarExtra`-only app has no main menu (measured: `NSApp.mainMenu` is
+  nil, so a shortcut attached to a button never fires even while its window is key). Intercept
+  the key in the window's `sendEvent` instead — that runs ahead of both the input method and
+  SwiftUI's own handling. Don't fix it by building a main menu: a menu-bar app that has no
+  Dock icon would then take over the system menu bar whenever it activates.
+- **Match shortcuts by key code, not by character.** With a Korean input source active, the
+  `charactersIgnoringModifiers` of a keyDown arrives empty, so a character comparison silently
+  stops working mid-composition. The key code is layout- and input-method-independent.
+- **A shortcut another app owns globally cannot be won locally.** Measured: a menu-bar utility
+  had registered `⌘,` globally, this app never saw the key, and quitting that utility made it
+  work immediately. That is why the settings shortcut is re-bindable — a fixed combination
+  turns into a missing feature on those machines, with no way for the user to tell why.
+- **The settings shortcut is deliberately not global.** It only fires while the transcript
+  window is in front. Registering it globally would steal `⌘,` from every other app.
 - **Use Carbon `RegisterEventHotKey` for the global shortcut.** An `NSEvent` global
   monitor requires accessibility permission (`kTCCServiceAccessibility`), which breaks the
   rule that this app asks only for microphone and audio capture.
@@ -137,7 +152,7 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `open build/Scribird.app`: run the locally built bundle.
 - `./install.sh`: release-build and replace `/Applications/Scribird.app`; restart an
   already running copy for the new build to take effect.
-- `swift test`: run the unit test suite (230 tests, no network required). The device-switch
+- `swift test`: run the unit test suite (242 tests, no network required). The device-switch
   tests do change the real default output device and restore it; they skip themselves on a
   machine with only one output device.
 

@@ -15,7 +15,7 @@ toolchain are required (verified on Swift 6.3.3 / macOS 26.5.2).
 
 ```bash
 swift build -c debug   # compile with actor data-race checks enabled
-swift test             # 230 tests; STT fixture and device tests need local resources
+swift test             # 242 tests; STT fixture and device tests need local resources
 ./build.sh release     # produce and sign build/Scribird.app
 ./install.sh           # release-build, then install into /Applications
 ```

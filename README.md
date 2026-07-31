@@ -45,7 +45,7 @@ written to disk.
 | **Per-meeting session boundaries** | Starting a new meeting swaps the output files without interrupting capture — you don't lose the opening of the next meeting |
 | **Follows device changes** | Plug in a headset mid-meeting and capture moves with it, without splitting the transcript or the audio files |
 | **Or pin a device** | Choose a specific microphone or output device per source and capture stays there, even when the system default moves |
-| **Global hotkey** | `⌥⌘S` brings up the transcript window from anywhere, and it stays open when it loses focus |
+| **Global hotkey** | `⌥⌘S` brings up the transcript window from anywhere, and it stays open when it loses focus. Both shortcuts are re-bindable |
 
 ## System Requirements
 
@@ -185,7 +185,8 @@ defaults read com.scribird.app
 | `savesOriginalAudio` | Save original audio | `true` |
 | `pinnedInputDeviceUID` | Pinned microphone | unset (follow system default) |
 | `pinnedOutputDeviceUID` | Pinned output device | unset (follow system default) |
-| `hotKeyCode`, `hotKeyModifiers` | Global hotkey | `⌥⌘S` |
+| `hotKeyCode`, `hotKeyModifiers` | Global hotkey (show transcript) | `⌥⌘S` |
+| `settingsHotKeyCode`, `settingsHotKeyModifiers` | Open settings | `⌘,` |
 
 Window positions and the menu-bar item position are stored in the same domain by AppKit.
 A value that can't be interpreted falls back to its default rather than failing to start a
