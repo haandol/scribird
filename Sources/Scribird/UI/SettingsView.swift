@@ -36,6 +36,27 @@ struct SettingsView: View {
                 }
             }
 
+            // 이 섹션은 녹취 중에도 잠그지 않는다. 장치를 잘못 골라 회의가 비어 있는 것을
+            // 발견하는 시점이 회의 중이므로, 그때 고칠 수 없으면 목적을 잃는다.
+            Section("캡처 장치") {
+                CaptureDevicePicker(
+                    recorder: recorder,
+                    change: .input,
+                    title: "마이크 (나)"
+                )
+                CaptureDevicePicker(
+                    recorder: recorder,
+                    change: .output,
+                    title: "시스템 오디오 (상대방)"
+                )
+
+                if recorder.state.isBusy {
+                    Text("녹취 중에 바꾸면 그 소스만 새 장치로 다시 연결됩니다. 회의록은 끊기지 않습니다.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("단축키") {
                 LabeledContent("전사 창 띄우기") {
                     ShortcutField(settings: hotKeySettings)

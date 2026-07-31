@@ -26,13 +26,33 @@ final class MeetingRecorder {
     private(set) var state: State = .idle
     private(set) var segments: [TranscriptSegment] = []
     private(set) var startedAt: Date?
+
+    /// 문서용 스크린샷 모드인지. 환경 변수로만 켜진다.
+    ///
+    /// 켜져 있으면 캡처·전사·저장을 시작하지 않고 화면에 보이는 값만 채운다. 실제 회의를
+    /// 녹취해 스크린샷을 찍으면 그 내용이 저장소에 들어가는데, 이 프로젝트는 녹음도 회의록도
+    /// 커밋하지 않으므로 그 경로를 쓸 수 없다.
+    private let isDemo = DemoMode.isEnabled
     /// 직전 세션이 저장된 디렉터리. 메뉴에서 "폴더 열기"에 쓴다.
     private(set) var lastSessionDirectory: URL?
 
     /// 회의 언어 구성. 한국어·영어·둘 다 중에서 고른다.
-    var language: TranscriptionLanguage = .auto
+    ///
+    /// 바뀔 때마다 저장한다 — 설정 창의 항목은 앱을 다시 켜도 유지된다.
+    var language: TranscriptionLanguage = RecordingPreferences.language() {
+        didSet {
+            guard language != oldValue else { return }
+            RecordingPreferences.save(language: language)
+        }
+    }
+
     /// 원본 오디오를 소스별 파일로 남길지. 껐다 켜기를 UI에서 노출한다.
-    var savesAudio = true
+    var savesAudio = RecordingPreferences.savesAudio() {
+        didSet {
+            guard savesAudio != oldValue else { return }
+            RecordingPreferences.save(savesAudio: savesAudio)
+        }
+    }
 
     /// 이번 세션에서 실제로 살아 있는 소스. 권한이 없어 못 켠 소스는 빠진다.
     private(set) var activeSources: Set<Speaker> = []
@@ -82,6 +102,8 @@ final class MeetingRecorder {
     /// `@Observable`은 오디오 콜백이 갱신하는 값을 추적할 수 없다(메인 액터 밖에서
     /// 초당 수십 번 바뀐다). 그래서 UI가 `TimelineView`로 주기적으로 당겨 읽는다.
     func inputLevel(for speaker: Speaker) -> InputLevel? {
+        // 문서용 스크린샷 모드에서는 캡처가 없으므로 만든 값을 보여준다.
+        if isDemo { return DemoMode.inputLevel(for: speaker) }
         guard let capture = capture(for: speaker) else { return nil }
         return InputLevel(meter: capture.level.meterValue, decibels: capture.level.decibels)
     }
@@ -108,6 +130,12 @@ final class MeetingRecorder {
     private var audioRecorder: AudioRecorder?
     private var runTasks: [Task<Void, Never>] = []
     private var reservedLocales: [Locale] = []
+    /// 기본 장치 변경 감시기. 녹취 중에만 살아 있다.
+    private var deviceMonitor: AudioDeviceMonitor?
+    /// 소스별로 지금 어떤 방식으로 장치가 정해졌는지.
+    ///
+    /// 고정된 소스는 시스템 기본 변경을 무시해야 하므로, 알림을 받았을 때 이 표를 본다.
+    private var deviceSelections: [Speaker: CaptureDeviceSelection.Resolution] = [:]
     /// 캡처 시작 이후 지나온 세션 경계의 누적 길이(초).
     ///
     /// 경계를 끊어도 캡처는 계속 흐르므로 전사기가 주는 시각은 계속 커진다.
@@ -118,6 +146,17 @@ final class MeetingRecorder {
 
     func start() async {
         guard !state.isBusy else { return }
+
+        // 스크린샷 모드는 화면만 채운다. 권한도 요구하지 않고 파일도 만들지 않는다.
+        if isDemo {
+            segments = DemoMode.segments
+            startedAt = DemoMode.startedAt
+            activeSources = Set(Speaker.allCases)
+            sourceWarning = nil
+            state = .recording
+            return
+        }
+
         state = .preparingModel(0)
         timeline.reset()
         segments = []
@@ -182,11 +221,17 @@ final class MeetingRecorder {
             // 없어도 마이크 전사는 계속돼야 한다.
             var failures: [String] = []
 
+            // 캡처할 장치를 소스별로 결정한다. 고정된 장치가 없으면 시스템 기본을 따라간다.
+            let inputSelection = CaptureDeviceSelection.resolve(for: .input)
+            let outputSelection = CaptureDeviceSelection.resolve(for: .output)
+            deviceSelections = [.me: inputSelection, .remote: outputSelection]
+
             // ── 마이크 (AVAudioEngine, 마이크 권한만 필요) ──
             if await MicrophoneCapture.requestPermission() {
                 let microphone = MicrophoneCapture(
                     targetFormat: audioFormat,
-                    audioRecorder: audioRecorder
+                    audioRecorder: audioRecorder,
+                    deviceUID: inputSelection.deviceUID
                 )
                 do {
                     try microphone.start()
@@ -207,7 +252,8 @@ final class MeetingRecorder {
             // ── 시스템 출력 (Core Audio Process Tap, 오디오 캡처 권한만 필요) ──
             let systemAudio = SystemAudioCapture(
                 targetFormat: audioFormat,
-                audioRecorder: audioRecorder
+                audioRecorder: audioRecorder,
+                deviceUID: outputSelection.deviceUID
             )
             do {
                 try systemAudio.start()
@@ -235,8 +281,20 @@ final class MeetingRecorder {
                 return
             }
             // 하나만 켜졌으면 녹취는 진행하되 무엇이 빠졌는지 알린다.
-            if !failures.isEmpty {
-                sourceWarning = failures.joined(separator: " / ")
+            // 고른 장치가 사라져 기본으로 되돌린 것도 여기서 함께 알린다 — 사용자가 고른
+            // 장치가 아니라는 사실을 알아야 한다.
+            let selectionWarnings = Speaker.allCases.compactMap { speaker -> String? in
+                guard activeSources.contains(speaker),
+                      let selection = deviceSelections[speaker]
+                else { return nil }
+                return CaptureDeviceSelection.warning(
+                    for: selection,
+                    change: speaker == .me ? .input : .output
+                )
+            }
+            let allWarnings = failures + selectionWarnings
+            if !allWarnings.isEmpty {
+                sourceWarning = allWarnings.joined(separator: " / ")
             }
 
             self.sessions = sessions
@@ -244,6 +302,10 @@ final class MeetingRecorder {
             self.audioRecorder = audioRecorder
             self.startedAt = startedAt
             state = .recording
+
+            // 캡처가 뜬 뒤에 감시를 켠다. 회의 직전·도중의 장치 전환을 따라가지 않으면
+            // 사용자가 헤드셋으로 듣는 동안 탭은 빈 스피커를 계속 잡는다.
+            startDeviceMonitoring()
         } catch {
             await teardown()
             state = .failed(error.localizedDescription)
@@ -283,7 +345,22 @@ final class MeetingRecorder {
 
     func stop() async {
         guard state == .recording else { return }
+
+        // 스크린샷 모드에는 마무리할 캡처도 저장할 파일도 없다.
+        if isDemo {
+            segments = []
+            startedAt = nil
+            activeSources = []
+            state = .idle
+            return
+        }
+
         state = .stopping
+
+        // 감시를 캡처보다 먼저 끊는다. 남겨 두면 마무리 중에 도착한 알림이 이미 멈춘
+        // 캡처를 다시 열 수 있다.
+        deviceMonitor?.stop()
+        deviceMonitor = nil
 
         // 캡처를 먼저 끊어야 입력 스트림이 끝나고 분석기가 마무리에 들어간다.
         microphone?.stop()
@@ -333,6 +410,129 @@ final class MeetingRecorder {
         case .idle, .failed: await start()
         case .preparingModel, .stopping: break
         }
+    }
+
+    // MARK: - 장치 변경 추적
+
+    /// 기본 장치 변경 감시를 시작한다. 녹취 중에만 감시한다 — 대기 중에는 따라갈 대상이
+    /// 없고, 다음 시작이 그 시점의 장치를 새로 읽는다.
+    private func startDeviceMonitoring() {
+        let monitor = AudioDeviceMonitor { [weak self] change in
+            Task { @MainActor [weak self] in
+                await self?.followDeviceChange(change)
+            }
+        }
+        monitor.start()
+        deviceMonitor = monitor
+    }
+
+    /// 바뀐 장치로 영향받은 소스의 캡처만 다시 연결한다.
+    ///
+    /// **세션 경계를 만들지 않는다.** 장치가 바뀐 것은 회의가 바뀐 것이 아니므로 회의록·
+    /// 원본 오디오 파일·발화 시간축이 모두 이어진다. 전사 세션도 그대로 둔다 — 입력
+    /// 스트림을 갈아 끼우면 전사기가 마무리에 들어가 모델 확보 관문을 다시 통과하고,
+    /// 그 사이 발화가 사라진다.
+    ///
+    /// 재연결 사이의 오디오는 잃는다. 복구할 방법이 없으므로 숨기지 않고 알린다.
+    private func followDeviceChange(_ change: AudioDeviceMonitor.Change) async {
+        // 중지·회전 중에 도착한 알림은 무시한다. 그 경로가 캡처를 이미 다루고 있다.
+        guard state == .recording else { return }
+
+        let speaker: Speaker = switch change {
+        case .output: .remote
+        case .input: .me
+        }
+        // 시작하지 못한 소스는 따라갈 캡처가 없다. 장치가 생겨서 이제 열 수 있게 됐더라도
+        // 여기서 새로 켜지 않는다 — 전사 세션이 이미 폐기됐으므로 물릴 곳이 없다.
+        guard activeSources.contains(speaker) else { return }
+
+        // **고정된 소스는 기본 변경을 따라가지 않는다.** 고정의 의미가 그것이다. 다만 고른
+        // 장치가 없어 기본으로 되돌린 상태에서는 따라간다 — 그렇지 않으면 장치가 사라진 뒤
+        // 시스템이 다른 장치로 옮겨가도 계속 빈 소리를 잡는다.
+        let selection = deviceSelections[speaker] ?? .systemDefault
+        guard selection.followsSystemDefault else { return }
+
+        let deviceName = AudioDeviceMonitor.currentDeviceName(for: change)
+        do {
+            switch change {
+            case .output: try systemAudio?.reconnect()
+            case .input: try microphone?.reconnect()
+            }
+            // 어느 장치로 옮겼는지 알려야 전환 구간의 공백을 회의 내용으로 오해하지 않는다.
+            let label = speaker == .me ? "마이크" : "시스템 오디오"
+            sourceWarning = deviceName.map { "\(label)를 «\($0)»로 옮겼습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다." }
+                ?? "\(label) 장치가 바뀌어 다시 연결했습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다."
+        } catch {
+            // 한 소스의 재연결 실패가 다른 소스를 멈추지 않는다 — 시작 시점의 실패 격리와
+            // 같은 규칙이다. 둘 다 잃었을 때만 세션을 접는다.
+            await loseSource(speaker, reason: error.localizedDescription)
+        }
+    }
+
+    /// 사용자가 캡처 장치를 고르거나 따라가기로 되돌린다.
+    ///
+    /// **녹취 중에도 바꿀 수 있다.** 장치를 잘못 골라 회의가 비어 있는 것을 발견하는 시점이
+    /// 회의 중이므로, 그때 고칠 수 없으면 이 기능의 목적을 잃는다. 세션은 유지하고 그 소스의
+    /// 캡처만 다시 연결한다.
+    func selectCaptureDevice(_ uid: String?, for change: AudioDeviceMonitor.Change) async {
+        RecordingPreferences.save(pinnedDeviceUID: uid, for: change)
+
+        let speaker: Speaker = switch change {
+        case .input: .me
+        case .output: .remote
+        }
+        let selection = CaptureDeviceSelection.resolve(for: change)
+        deviceSelections[speaker] = selection
+
+        // 녹취 중이 아니면 다음 시작이 이 선택을 읽는다.
+        guard state == .recording, activeSources.contains(speaker) else { return }
+
+        do {
+            switch change {
+            case .input: try microphone?.reconnect(toDeviceUID: selection.deviceUID)
+            case .output: try systemAudio?.reconnect(toDeviceUID: selection.deviceUID)
+            }
+            let label = speaker == .me ? "마이크" : "시스템 오디오"
+            let target = selection.deviceUID.flatMap { AudioDeviceCatalog.name(forUID: $0) }
+                ?? AudioDeviceMonitor.currentDeviceName(for: change)
+            sourceWarning = target.map {
+                "\(label)를 «\($0)»로 바꿨습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다."
+            } ?? "\(label) 장치를 바꿨습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다."
+        } catch {
+            await loseSource(speaker, reason: error.localizedDescription)
+        }
+    }
+
+    /// 사용자에게 보여줄 장치 목록. 설정 화면이 읽는다.
+    func availableDevices(for change: AudioDeviceMonitor.Change) -> [AudioDevice] {
+        AudioDeviceCatalog.devices(for: change)
+    }
+
+    /// 지금 고정된 장치의 UID. nil이면 시스템 기본을 따라가는 상태다.
+    func pinnedDeviceUID(for change: AudioDeviceMonitor.Change) -> String? {
+        RecordingPreferences.pinnedDeviceUID(for: change)
+    }
+
+    /// 재연결에 실패한 소스를 세션에서 뺀다. 남은 소스가 없으면 세션을 접는다.
+    private func loseSource(_ speaker: Speaker, reason: String) async {
+        switch speaker {
+        case .me:
+            microphone?.stop()
+            microphone = nil
+        case .remote:
+            systemAudio?.stop()
+            systemAudio = nil
+        }
+        activeSources.remove(speaker)
+
+        let label = speaker == .me ? "마이크" : "시스템 오디오"
+        guard activeSources.isEmpty else {
+            sourceWarning = "\(label)를 새 장치로 다시 연결하지 못해 이 소스의 기록이 멈췄습니다: \(reason)"
+            return
+        }
+        // 남은 소스가 없으면 더 기록할 것이 없다. 확보한 회의록은 저장하고 끝낸다.
+        await stop()
+        state = .failed("\(label)를 새 장치로 다시 연결하지 못해 녹취를 마쳤습니다: \(reason)")
     }
 
     // MARK: - 세션 경계
@@ -449,6 +649,8 @@ final class MeetingRecorder {
     }
 
     private func teardown() async {
+        deviceMonitor?.stop()
+        deviceMonitor = nil
         for task in runTasks { task.cancel() }
         runTasks.removeAll()
         for session in sessions.values { await session.cancel() }

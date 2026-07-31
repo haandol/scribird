@@ -50,6 +50,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 사용자가 메뉴바를 열지 않아도 단축키가 준비돼 있어야 한다.
         windows.activateHotKey()
+
+        // 문서용 스크린샷 모드: 창을 띄우고 화면을 채운 상태로 둔다.
+        //
+        // 메뉴바 앱이라 창이 사용자 조작 없이는 뜨지 않는데, 창을 띄우는 조작을 자동화하려면
+        // 접근성 권한이 필요하다. 이 앱은 마이크와 오디오 캡처만 요구하므로 그 권한을 쓸 수
+        // 없다. 그래서 스크린샷을 찍을 때만 앱이 스스로 창을 띄운다.
+        if DemoMode.isEnabled {
+            windows.showTranscriptForDemo()
+            Task { await recorder.start() }
+            if DemoMode.opensSettings {
+                // 전사 창이 자리를 잡은 뒤에 띄운다 — 같은 층이라 나중에 부른 창이 앞에 온다.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    windows.showSettingsForDemo()
+                }
+            }
+        }
     }
 }
 
@@ -88,6 +105,16 @@ final class WindowCoordinator {
     }
 
     func showSettings() {
+        settingsWindow.show()
+    }
+
+    /// 문서용 스크린샷 모드에서만 쓴다. 전사 창을 사용자 조작 없이 띄운다.
+    func showTranscriptForDemo() {
+        transcriptWindow.show()
+    }
+
+    /// 문서용 스크린샷 모드에서만 쓴다. 설정 창을 함께 띄운다.
+    func showSettingsForDemo() {
         settingsWindow.show()
     }
 }

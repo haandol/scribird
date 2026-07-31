@@ -24,6 +24,11 @@
           "path": "docs/adr/capture/0004-input-level-diagnostics.md",
           "status": "Proposed",
           "summary": "레벨을 미터·무음판정·발화평균 세 값으로 나눠 추적하고 원본에 게인 보정을 하지 않는다"
+        },
+        {
+          "path": "docs/adr/capture/0005-capture-device-change-follow.md",
+          "status": "Proposed",
+          "summary": "캡처 장치는 시스템 기본을 따라가고 사용자가 고르면 그 장치에 고정한다 (세션은 끊지 않음)"
         }
       ],
       "dependsOn": []
@@ -48,7 +53,9 @@
           "summary": "로케일 예약·모델 설치가 끝난 뒤에 오디오 포맷을 확정하고 캡처를 시작한다"
         }
       ],
-      "dependsOn": ["capture"]
+      "dependsOn": [
+        "capture"
+      ]
     },
     "session": {
       "feature": "녹취 세션 경계와 화면 접근",
@@ -75,7 +82,11 @@
           "summary": "버전 확인은 사용자가 누를 때만 조회하고 앱이 내려받지는 않는다 (자동 조회 없음)"
         }
       ],
-      "dependsOn": ["capture", "transcription", "archive"]
+      "dependsOn": [
+        "capture",
+        "transcription",
+        "archive"
+      ]
     },
     "archive": {
       "feature": "회의록과 원본 오디오 보관",
@@ -92,7 +103,9 @@
           "summary": "원본을 소스별로 리샘플링 전 AAC 128k로 저장한다 (64k는 재전사 오인식 발생)"
         }
       ],
-      "dependsOn": ["transcription"]
+      "dependsOn": [
+        "transcription"
+      ]
     }
   }
 }

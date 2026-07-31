@@ -82,6 +82,27 @@ enum Fixture {
     }
 }
 
+/// 오디오 콜백·Core Audio 리스너 큐에서 온 값을 테스트가 안전하게 모으는 상자.
+///
+/// 그 콜백들은 메인 액터 밖에서 오므로 지역 `var`를 그대로 캡처하면 Swift 6 데이터 경합
+/// 검사가 잡는다. 검사를 약화하는 대신 락으로 감싼다 — 소스가 쓰는 것과 같은 패턴이다.
+final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) {
+        stored = value
+    }
+
+    var value: Value {
+        lock.withLock { stored }
+    }
+
+    func mutate(_ body: (inout Value) -> Void) {
+        lock.withLock { body(&stored) }
+    }
+}
+
 extension Array where Element == TranscriptSegment {
     /// 결과를 `[locale] 텍스트` 형태로 눌러 담아 비교하기 쉽게 만든다.
     var digest: [String] {

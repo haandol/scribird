@@ -15,6 +15,9 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
         case noInputDevice
         case permissionDenied
         case engineFailed(any Error)
+        /// 고른 장치가 지금 없다. 뽑힌 헤드셋을 가리키는 경우가 대표적이다.
+        case deviceUnavailable(String)
+        case deviceSelectionFailed(OSStatus)
 
         var errorDescription: String? {
             switch self {
@@ -24,6 +27,10 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
                 "마이크 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 Scribird를 허용해 주세요."
             case .engineFailed(let error):
                 "마이크를 열 수 없습니다: \(error.localizedDescription)"
+            case .deviceUnavailable:
+                "설정에서 고른 마이크를 찾을 수 없습니다. 연결을 확인하거나 다른 장치를 골라 주세요."
+            case .deviceSelectionFailed(let status):
+                "고른 마이크로 전환할 수 없습니다. (코드 \(status))"
             }
         }
     }
@@ -31,7 +38,15 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let pump: AnalyzerInputPump
 
-    init(targetFormat: AVAudioFormat, audioRecorder: AudioRecorder?) {
+    /// 캡처할 장치의 UID. nil이면 시스템 기본 입력을 쓴다.
+    private var pinnedDeviceUID: String?
+
+    init(
+        targetFormat: AVAudioFormat,
+        audioRecorder: AudioRecorder?,
+        deviceUID: String? = nil
+    ) {
+        self.pinnedDeviceUID = deviceUID
         self.pump = AnalyzerInputPump(
             speaker: .me,
             targetFormat: targetFormat,
@@ -65,6 +80,17 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
 
     func start() throws {
         let input = engine.inputNode
+
+        // 고정된 장치가 있으면 엔진의 입력을 그 장치로 돌린다.
+        //
+        // `AVAudioEngine`은 기본 입력만 쓰므로, 장치를 바꾸려면 그 밑의 AUHAL에 직접
+        // 설정해야 한다. **포맷을 읽기 전에 설정해야 한다** — 장치를 바꾸면 채널 수가 함께
+        // 바뀐다 (실측: 내장 마이크 1ch → USB 헤드셋 2ch). 먼저 읽으면 이전 장치의 포맷으로
+        // 탭을 걸어 어긋난다.
+        if let uid = pinnedDeviceUID {
+            try Self.setInputDevice(uid: uid, on: input)
+        }
+
         let inputFormat = input.inputFormat(forBus: 0)
 
         // 입력 장치가 없으면 샘플레이트가 0으로 온다.
@@ -87,11 +113,70 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
         }
     }
 
+    /// 기본 입력 장치가 바뀌었을 때 새 장치로 다시 연결한다.
+    ///
+    /// `AVAudioEngine`은 시작 시점의 입력 장치를 붙잡으므로, 장치가 바뀌면 엔진을 멈추고
+    /// 새 입력 노드 포맷으로 탭을 다시 걸어야 한다. **입력 스트림은 갈아 끼우지 않는다** —
+    /// `pump`를 그대로 두므로 전사기는 같은 스트림을 계속 읽고, 회의록·원본 오디오·시간축이
+    /// 이어진다.
+    ///
+    /// 새 장치의 샘플레이트·채널 수는 이전과 다를 수 있다. `pump`가 포맷 변화를 흡수한다.
+    func reconnect() throws {
+        stopEngine()
+        try start()
+    }
+
+    /// 캡처할 장치를 바꿔 다시 연결한다. 녹취 중에도 호출된다.
+    func reconnect(toDeviceUID uid: String?) throws {
+        pinnedDeviceUID = uid
+        try reconnect()
+    }
+
+    /// 엔진의 입력을 지정한 장치로 돌린다.
+    ///
+    /// 실측으로 확인한 동작: `AudioUnitSetProperty`가 성공하면 되읽기에서 같은 장치가 나오고
+    /// `inputFormat`의 채널 수도 그 장치의 것으로 바뀐다. 되읽어 확인하는 이유는 이 앱이
+    /// 캡처에서 지키는 규칙과 같다 — 성공 반환만으로는 실제 반영을 판단하지 않는다.
+    private static func setInputDevice(uid: String, on input: AVAudioInputNode) throws {
+        var deviceID = AudioDeviceCatalog.deviceID(forUID: uid)
+        guard deviceID != .zero else { throw CaptureError.deviceUnavailable(uid) }
+        guard let unit = input.audioUnit else { throw CaptureError.deviceUnavailable(uid) }
+
+        let status = AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        guard status == noErr else { throw CaptureError.deviceSelectionFailed(status) }
+
+        var applied = AudioObjectID.zero
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let readback = AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &applied,
+            &size
+        )
+        guard readback == noErr, applied == deviceID else {
+            throw CaptureError.deviceSelectionFailed(readback)
+        }
+    }
+
     func stop() {
+        stopEngine()
+        pump.finish()
+    }
+
+    /// 장치 자원만 되돌린다. 입력 스트림은 건드리지 않으므로 재연결에도 쓴다.
+    private func stopEngine() {
         if engine.isRunning {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
-        pump.finish()
     }
 }
