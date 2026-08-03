@@ -201,24 +201,175 @@ is an empirical finding, **record the measurement, not just the conclusion**. Th
 is why the invariants in `AGENTS.md` are recoverable at all. No formatter or linter is
 configured, so match nearby code.
 
-## Commits and pull requests
+## Commits
 
-Commit subjects are short and in Korean, for example:
+This project follows [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
 
 ```
-입력 레벨 미터 추가 및 조용한 캡처 실패 노출
+<type>(<scope>): <subject>
+
+[body]
+
+[footer(s)]
 ```
 
-Bodies explain *why*. When a change came from a measurement, include the numbers and the
-failure mode that was ruled out — the commit history is this project's primary record of
-hardware behavior, and a subject line alone loses that.
+### Type (required)
 
-Pull requests should:
+| Type | Use for | SemVer |
+|---|---|---|
+| `feat` | A new capability | MINOR |
+| `fix` | A bug fix | PATCH |
+| `refactor` | Restructuring with no behavior change | — |
+| `perf` | Performance work | — |
+| `test` | Tests only | — |
+| `docs` | Documentation only | — |
+| `chore` | Version bumps, build settings, maintenance | — |
+| `style` | Formatting, no logic change | — |
+| `ci` | CI/CD configuration | — |
 
-- explain the behavior change
-- list the verification commands you ran, including any manual smoke test
-- note permission or storage impacts
-- include screenshots for SwiftUI changes
+### Scope (optional)
 
-**Never include recorded meeting audio or generated transcripts** — not in commits, not in
-issues, not in pull request attachments.
+The scopes mirror the ADR categories, so a commit and the decision it implements name the same
+area:
+
+| Scope | Covers | Code lives in |
+|---|---|---|
+| `capture` | Microphone and system-audio capture, devices, levels | `Audio/` |
+| `transcription` | Analyzer sessions, language arbitration, model provisioning | `Transcription/` |
+| `session` | Session boundaries, hotkeys, windows, the update check | `UI/`, `MeetingRecorder.swift` |
+| `archive` | Transcript persistence and original-audio recording | `Transcript/`, `Audio/AudioRecorder` |
+
+The first four are exactly the ADR categories, so a commit and the decision it implements name
+the same area. Two scopes exist outside that mapping because they have no ADR to belong to:
+
+| Scope | Covers |
+|---|---|
+| `plugin` | The Claude Code / Codex plugin under `plugin/` |
+| `build` | `build.sh`, `install.sh`, `Package.swift`, bundle resources |
+
+Note that a scope is a *decision* area, not a folder — `archive` covers both
+`Transcript/` and the recorder inside `Audio/`, because one ADR governs them together. When
+unsure, ask which ADR the change answers to; if none does, it's probably `plugin` or `build`.
+
+Omit the scope when a change genuinely spans everything — a repository-wide docs pass, for
+instance.
+
+### Subject (required)
+
+- **English**, lowercase first letter
+- Imperative mood: "add", "fix", "keep" — not "added", "fixes", "keeping"
+- No trailing period
+- Aim for 50 characters, 72 is the hard limit
+
+English subjects with Korean comments and ADRs is deliberate, not an oversight. The commit log
+is read through `git log`, `gh`, and GitHub's UI where the subject is often truncated and
+searched; comments and ADRs are read in place, in full, by the people maintaining the audio
+path. The two audiences differ, so the language does too.
+
+### Body (optional)
+
+Explain **why**, not what — the diff already says what. Wrap at 72 columns.
+
+**When a change came from a measurement, put the numbers in.** This history is the project's
+primary record of hardware behavior, and there is often nowhere else that number lives. State
+the value observed and the failure mode it ruled out:
+
+```
+fix(archive): raise AAC bitrate to 128k per channel
+
+Re-transcribing 64k audio produced 배포 → 대포. 128k and lossless matched
+the original exactly. Mono runs about 54 MB an hour, which is worth paying
+because the whole point of keeping the original is reprocessing it.
+```
+
+### Footer (optional)
+
+- `BREAKING CHANGE: <description>` — for changes that break compatibility (SemVer MAJOR)
+- `Refs: #<issue>` — related issue
+- `Co-Authored-By: Name <email>` — co-author
+
+A breaking change is marked with `!` after the type, or with the footer:
+
+```
+feat(archive)!: move session directories under Application Support
+
+BREAKING CHANGE: existing sessions in ~/Documents/Scribird are not migrated.
+```
+
+### Good examples
+
+```
+feat(capture): follow the system default output device while recording
+fix(session): register the global hotkey from the app-launch callback
+refactor(capture): share one pump between both capture paths
+perf(transcription): reuse the converter across buffers of one format
+test(capture): assert the tap and the monitor read the same selector
+docs: restructure the README for users and add real screenshots
+chore: bump version to 0.1.3
+```
+
+### Bad examples
+
+```
+# no type
+Update level meter handling
+
+# past tense, capitalized
+feat: Added support for pinned devices
+
+# too vague to be searchable
+update stuff
+fix bug
+
+# two unrelated changes in one commit
+feat(capture): add device pinning and fix transcript timing
+```
+
+### Atomic commits
+
+One logical change per commit. Don't mix a fix with a feature, or a refactor with a behavior
+change. When a change is large, split it — and note that this matters more here than usual:
+**a commit that mixes a measurement-driven fix with unrelated work buries the measurement**,
+and that record is the reason the history is worth reading.
+
+An ADR change and the code that implements it are the exception: they belong in the *same*
+commit, because a decision that isn't yet in code and code that contradicts the decision are
+both worse than the pair landing together. See [ADR-first workflow](#adr-first-workflow).
+
+## Pull requests
+
+### Title
+
+Same format as a commit subject:
+
+```
+feat(capture): follow the system default output device while recording
+```
+
+### Body
+
+```markdown
+## Summary
+
+What changed, in a sentence or two.
+
+## Motivation
+
+Why. If a measurement drove it, the numbers go here.
+
+## Verification
+
+Commands you ran, and the result. Include the manual smoke test when the change
+touches capture, session rotation, or the hotkey.
+
+## Impact
+
+Permissions, storage layout, or preference keys this affects. "None" is a valid answer.
+```
+
+Include screenshots for SwiftUI changes.
+
+> [!IMPORTANT]
+> **Never include recorded meeting audio or generated transcripts** — not in commits, not in
+> issues, not in pull request attachments. This applies to screenshots too: capture a session
+> you're willing to publish, not a real meeting.

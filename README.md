@@ -21,13 +21,15 @@ Transcription and storage both happen on your machine. **Neither the meeting aud
 transcript ever leaves the device.** The app makes exactly one network request, and only
 when you press *Check for updates* in settings — see [Network use](#network-use).
 
-The app's interface is in Korean.
+The app's interface is in Korean. Where this document names a button, a setting, or a speaker
+label, it quotes the Korean the app actually draws and puts the English alongside — so that what
+you read here matches what you see on screen.
 
 > [!NOTE]
-> A separate, opt-in [Claude Code plugin](#optional-splitting-remote-into-individual-speakers)
-> can split *remote* into individual participants afterwards. It uploads the saved audio to
-> **your own** AWS account, so it is deliberately outside the app — the app itself still makes
-> no network request beyond the update check.
+> A separate, opt-in [plugin](#optional-splitting-remote-into-individual-speakers) for Claude
+> Code and Codex can split *remote* into individual participants afterwards. It sends the saved
+> audio to **your own** AWS account, so it is deliberately outside the app — the app itself
+> still makes no network request beyond the update check.
 
 <div align="center">
   <img src="docs/images/transcript.png" width="620" alt="Scribird transcript window: status and elapsed time, per-source level meters, and a bilingual conversation with me aligned right and remote aligned left" />
@@ -170,15 +172,15 @@ lifted afterwards, by a tool that isn't the app.
 
 [`plugin/scribird-diarize`](./plugin/README.md) is a Claude Code plugin that does exactly that.
 It sends `remote.m4a` to Amazon Transcribe for speaker partitioning, overlays only the speaker
-boundaries onto the transcript you already have, and turns one merged `상대방` into
-`상대방 A` / `상대방 B`:
+boundaries onto the transcript you already have, splitting the single `상대방` label
+(*remote*, as the app writes it) into `상대방 A` / `상대방 B`:
 
 ```
-Before   [상대방] 00:12  네, 그럼 배포 일정은 다음 주 화요일로 하죠.
-         [상대방] 00:18  저는 그 다음 주가 좋습니다. QA 시간이 필요해서요.
+Before   [상대방]   00:12  Let's ship on Tuesday next week, then.
+         [상대방]   00:18  I'd prefer the week after. QA needs the time.
 
-After    [상대방 A] 00:12  네, 그럼 배포 일정은 다음 주 화요일로 하죠.
-         [상대방 B] 00:18  저는 그 다음 주가 좋습니다. QA 시간이 필요해서요.
+After    [상대방 A] 00:12  Let's ship on Tuesday next week, then.
+         [상대방 B] 00:18  I'd prefer the week after. QA needs the time.
 ```
 
 > [!WARNING]
@@ -239,7 +241,7 @@ haandol/scribird` — which is the same marketplace fetched over Git instead of 
 Just ask, in either agent:
 
 ```
-~/Documents/Scribird/2026-07-31_142530 의 상대방을 화자별로 나눠줘
+split the remote speaker in ~/Documents/Scribird/2026-07-31_142530 by participant
 ```
 
 The agent picks the session, reads the language out of your existing transcript, shows you what

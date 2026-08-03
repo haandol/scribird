@@ -230,11 +230,30 @@ Carbon event target nor a live capture rotation exists under `swift test`:
 
 ## Commit & Pull Request Guidelines
 
-Commit subjects are short and in Korean, for example `입력 레벨 미터 추가 및 조용한 캡처
-실패 노출`. Bodies explain *why*, and when a change came from a measurement, they include
-the numbers and the failure mode that was ruled out. Keep that standard — it is the
-project's primary record of hardware behavior.
+Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+`<type>(<scope>): <subject>`.
 
-Pull requests should explain behavior changes, list verification commands, note permission
-or storage impacts, and include screenshots for SwiftUI changes. Never include recorded
-meeting audio or generated transcripts.
+- **Type**: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `style`, `ci`.
+- **Scope**: `capture`, `transcription`, `session`, `archive` — the ADR categories, so a
+  commit and the decision it implements name the same area. A scope is a decision area, not a
+  folder: `archive` covers transcript persistence *and* the audio recorder, because one ADR
+  governs both. `plugin` and `build` exist outside that mapping, having no ADR. Omit the scope
+  only when a change genuinely spans everything.
+- **Subject**: English, lowercase, imperative, no trailing period, ≤72 characters.
+  English here while comments and ADRs stay Korean is deliberate: the log is read truncated
+  and searched through `git log` and GitHub, whereas comments are read in place by whoever
+  maintains the audio path.
+
+Bodies explain *why*, and **when a change came from a measurement they include the numbers
+and the failure mode that was ruled out.** Keep that standard — this history is the project's
+primary record of hardware behavior, and for many of those numbers there is nowhere else
+they live.
+
+One logical change per commit. The exception is an ADR change and the code implementing it,
+which belong in the same commit.
+
+Pull requests use a commit-style title and a body covering Summary / Motivation /
+Verification / Impact. Include screenshots for SwiftUI changes. Never include recorded
+meeting audio or generated transcripts — commits, issues, and attachments alike.
+
+Full rules and examples: [`CONTRIBUTING.md`](./CONTRIBUTING.md#commits).
