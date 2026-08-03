@@ -1,0 +1,19 @@
+{
+  "name": "scribird-diarize",
+  "displayName": "Scribird Diarize",
+  "version": "0.1.0",
+  "description": "Scribird 회의 녹음을 AWS Transcribe로 다중 화자 분리하고, 온디바이스 전사와 대조해 `상대방`을 `상대방 A/B/C`로 세분화한다. 로컬 AWS 자격 증명을 그대로 쓰고 작업 후 S3를 정리한다.",
+  "author": {
+    "name": "haandol"
+  },
+  "homepage": "https://github.com/haandol/scribird",
+  "repository": "https://github.com/haandol/scribird",
+  "license": "MIT",
+  "keywords": [
+    "scribird",
+    "diarization",
+    "speaker-labels",
+    "aws-transcribe",
+    "meeting-transcript"
+  ]
+}

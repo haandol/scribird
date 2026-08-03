@@ -20,6 +20,14 @@ swift test             # 242 tests; STT fixture and device tests need local reso
 ./install.sh           # release-build, then install into /Applications
 ```
 
+The Claude Code plugin under [`plugin/`](./plugin/README.md) is separate from the app and has
+its own suite, which needs neither the toolchain nor AWS:
+
+```bash
+cd plugin/scribird-diarize/skills/multi-speaker-diarize
+/usr/bin/python3 -m unittest discover -s tests   # 112 tests
+```
+
 Two things about running it:
 
 - **Run it as a bundle, not as a bare executable.** macOS ties permissions (TCC) to the

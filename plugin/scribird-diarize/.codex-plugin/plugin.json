@@ -1,0 +1,38 @@
+{
+  "name": "scribird-diarize",
+  "version": "0.1.0",
+  "description": "Split the merged remote speaker in a Scribird meeting transcript into individual participants using Amazon Transcribe, without uploading to S3.",
+  "author": {
+    "name": "haandol",
+    "url": "https://github.com/haandol"
+  },
+  "homepage": "https://github.com/haandol/scribird/tree/main/plugin/scribird-diarize",
+  "repository": "https://github.com/haandol/scribird",
+  "license": "MIT",
+  "keywords": [
+    "scribird",
+    "diarization",
+    "speaker-labels",
+    "aws-transcribe",
+    "meeting-transcript",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Scribird Diarize",
+    "shortDescription": "Split one merged remote speaker into individual participants",
+    "longDescription": "Scribird labels your microphone as me and system output as remote, which is exact but caps speaker separation at two. Meeting apps mix participants down before the audio is captured, so remote is one label for everyone on the far side. This plugin sends the saved remote audio to Amazon Transcribe for speaker partitioning, streaming it over a WebSocket so nothing is stored in S3, then overlays only the speaker boundaries onto the on-device transcript. The transcript text is never replaced — where the two engines heard a word differently, the difference is reported for you to judge.",
+    "developerName": "haandol",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/haandol/scribird/tree/main/plugin/scribird-diarize",
+    "defaultPrompt": [
+      "Split the remote speaker in my latest Scribird session into individual participants.",
+      "Diarize the meeting audio in ~/Documents/Scribird and update the transcript.",
+      "Compare my on-device transcript against Amazon Transcribe and show me the differences.",
+      "How many people spoke in this recording?"
+    ],
+    "brandColor": "#0F766E",
+    "screenshots": []
+  }
+}

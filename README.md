@@ -23,6 +23,12 @@ when you press *Check for updates* in settings — see [Network use](#network-us
 
 The app's interface is in Korean.
 
+> [!NOTE]
+> A separate, opt-in [Claude Code plugin](#optional-splitting-remote-into-individual-speakers)
+> can split *remote* into individual participants afterwards. It uploads the saved audio to
+> **your own** AWS account, so it is deliberately outside the app — the app itself still makes
+> no network request beyond the update check.
+
 <div align="center">
   <img src="docs/images/transcript.png" width="620" alt="Scribird transcript window: status and elapsed time, per-source level meters, and a bilingual conversation with me aligned right and remote aligned left" />
 </div>
@@ -156,6 +162,145 @@ check, and no preference that enables one. The request carries nothing the app p
 no transcript, no usage counts, no device identifier. Scribird never downloads an update
 either — it points you at the release page and leaves signature verification to Gatekeeper.
 
+## Optional: splitting *remote* into individual speakers
+
+Because a meeting app mixes participants down before Scribird ever sees them, *remote* is one
+label for everyone on the far side. The per-source `.m4a` files exist so that limit can be
+lifted afterwards, by a tool that isn't the app.
+
+[`plugin/scribird-diarize`](./plugin/README.md) is a Claude Code plugin that does exactly that.
+It sends `remote.m4a` to Amazon Transcribe for speaker partitioning, overlays only the speaker
+boundaries onto the transcript you already have, and turns one merged `상대방` into
+`상대방 A` / `상대방 B`:
+
+```
+Before   [상대방] 00:12  네, 그럼 배포 일정은 다음 주 화요일로 하죠.
+         [상대방] 00:18  저는 그 다음 주가 좋습니다. QA 시간이 필요해서요.
+
+After    [상대방 A] 00:12  네, 그럼 배포 일정은 다음 주 화요일로 하죠.
+         [상대방 B] 00:18  저는 그 다음 주가 좋습니다. QA 시간이 필요해서요.
+```
+
+> [!WARNING]
+> **This sends meeting audio to Amazon Transcribe under your own AWS account.** That is the
+> opposite of how the app works, which is why it lives outside the app and never runs on its
+> own. It uses your local `aws` credentials, prints exactly what it is about to send, and
+> refuses to proceed until you confirm.
+>
+> By default it **streams** the audio over a WebSocket, so nothing is stored in S3 — no bucket
+> to create, no object left behind to forget about.
+
+### Prerequisites
+
+| | Check |
+|---|---|
+| [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex/cli) | `claude --version` / `codex --version` |
+| AWS CLI with working credentials | `aws sts get-caller-identity` |
+| A region set | `aws configure get region` |
+| Python 3 | already there — macOS ships `/usr/bin/python3`, and nothing needs `pip install` |
+
+IAM permission needed for the default streaming path is just
+`transcribe:StartStreamTranscription`. The batch path additionally needs `s3:CreateBucket`,
+`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket`,
+`transcribe:StartTranscriptionJob`, and `transcribe:GetTranscriptionJob`.
+
+### Install
+
+The repository doubles as a plugin marketplace for both agents. Register it, then install the
+plugin from it — substitute the path where you cloned this repository.
+
+**Claude Code**
+
+```bash
+claude plugin marketplace add ~/git/scribird
+claude plugin install scribird-diarize@scribird
+```
+
+Inside a session, `/plugin marketplace add ~/git/scribird` then picking it from `/plugin` does
+the same thing. Invoke it with `/multi-speaker-diarize` or just describe the task.
+
+**Codex**
+
+```bash
+codex plugin marketplace add ~/git/scribird
+codex plugin add scribird-diarize@scribird
+```
+
+Invoke it with `$multi-speaker-diarize` or describe the task. Verify with
+`codex plugin list`, which should show `scribird-diarize@scribird` as *installed, enabled*.
+
+Both read the same skill; the two `plugin.json` files differ only in the metadata each agent
+expects. Once this repository is on GitHub you can also register it remotely — with
+`claude plugin marketplace add haandol/scribird` or `codex plugin marketplace add
+haandol/scribird` — which is the same marketplace fetched over Git instead of read from disk.
+
+### Use it
+
+Just ask, in either agent:
+
+```
+~/Documents/Scribird/2026-07-31_142530 의 상대방을 화자별로 나눠줘
+```
+
+The agent picks the session, reads the language out of your existing transcript, shows you what
+is about to be sent, and waits. Nothing leaves the machine until you say yes. It then reports
+how many speakers were found and which words the two engines heard differently.
+
+You can also run the scripts directly, which is useful when you want to see the exact steps:
+
+```bash
+cd plugin/scribird-diarize/skills/multi-speaker-diarize
+SESSION=~/Documents/Scribird/2026-07-31_142530
+
+# 1. Print the plan and stop (exit 3). Nothing has been sent yet.
+/usr/bin/python3 scripts/stream_transcribe.py --session "$SESSION" --language-code ko-KR
+
+# 2. Approve and run it.
+/usr/bin/python3 scripts/stream_transcribe.py --session "$SESSION" --language-code ko-KR --yes
+
+# 3. Overlay the speaker boundaries onto your transcript.
+/usr/bin/python3 scripts/merge_speakers.py --session "$SESSION" --aws-remote "$SESSION/aws-remote.json"
+```
+
+### What you get
+
+Three new files land next to the originals, which are never modified:
+
+| File | Contents |
+|---|---|
+| `transcript.speakers.md` | The readable transcript, now split by speaker. Body text is still your on-device transcript |
+| `transcript.speakers.jsonl` | Machine-readable. Keeps the original `me`/`remote` in a `source` field, so the certain two-way split is always recoverable |
+| `diarization-report.md` | How many speakers, how much each one talked, and every word the two engines wrote differently |
+
+### Two properties worth knowing
+
+These are what make the result trustworthy:
+
+- **The `me` / `remote` split is never re-derived.** That one came from the audio path and
+  cannot be wrong; only the *inside* of `remote` is estimated. `me.m4a` is not sent at all
+  unless you ask for it, since a microphone's speaker is already settled. (Pass
+  `--sources remote,me` when the meeting was in-person and other voices reached your mic.)
+- **Your on-device transcript stays the transcript.** Amazon Transcribe is called for speaker
+  boundaries, not for text. Where the two engines disagree on a word, the difference is
+  reported rather than silently applied — deciding which one is right needs meaning, and the
+  script doesn't claim to have it.
+
+### When you need the batch path instead
+
+Streaming can't do two things, and `scripts/run_transcribe.py` exists for exactly those:
+
+| | Streaming (default) | Batch |
+|---|---|---|
+| S3 | **not used** | creates a bucket, uploads, deletes after |
+| Speaker count | up to 10, not adjustable | `--max-speakers` 2–30 |
+| Multiple languages | one language only | multi-language identification |
+
+So reach for batch when more than 10 people attended, or when the meeting genuinely switches
+between two languages in comparable amounts. Otherwise streaming is the better trade.
+
+See [`plugin/README.md`](./plugin/README.md) for the full option list and the reasoning behind
+each default.
+
 ## Permissions
 
 Two things have to be allowed on first launch. **Screen-recording permission is never
@@ -230,7 +375,9 @@ Knowing them up front saves some surprise.
 - **Speaker separation tops out at *me* vs. *everyone remote*.** Individual participants are
   not distinguished. Apple Speech has no diarization API, and meeting apps mix participants
   down to a single stream before handing it to Core Audio. That is exactly why the original
-  audio is kept per source — a diarization model can be applied to it later.
+  audio is kept per source — see
+  [splitting *remote* afterwards](#optional-splitting-remote-into-individual-speakers) for an
+  opt-in tool that does it, at the cost of leaving the device.
 - **Remote audio recognizes less accurately.** The remote voice has already been through a
   codec and been played back. It is especially noticeable in Korean.
 - **Switching devices costs a moment of audio.** Scribird follows the default input and

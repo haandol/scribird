@@ -1,0 +1,20 @@
+{
+  "name": "scribird",
+  "interface": {
+    "displayName": "Scribird Plugins"
+  },
+  "plugins": [
+    {
+      "name": "scribird-diarize",
+      "source": {
+        "source": "local",
+        "path": "./plugin/scribird-diarize"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
