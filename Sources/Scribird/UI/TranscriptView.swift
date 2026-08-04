@@ -192,6 +192,17 @@ struct TranscriptView: View {
                         action: ("개인정보 설정 열기", .privacyRoot)
                     )
                 }
+                if let warning = recorder.modelRetentionWarning {
+                    // 예약 없이 녹취 중인 세션. 조용히 넘어가면 회수 위험이 있는 세션과
+                    // 없는 세션을 구분할 수 없다. 사용자가 열 설정 화면이 없으므로
+                    // 안내만 남긴다.
+                    inlineNotice(
+                        warning,
+                        systemImage: "arrow.down.circle.badge.exclamationmark",
+                        tint: .orange,
+                        action: nil
+                    )
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

@@ -53,6 +53,29 @@ final class MeetingRecorder {
     /// 일부 소스만 켜졌을 때 사용자에게 알릴 사유.
     private(set) var sourceWarning: String?
 
+    /// 언어 모델을 예약하지 못한 채 녹취를 진행하고 있을 때 알릴 사유.
+    ///
+    /// `sourceWarning`과 따로 둔다. 그쪽은 장치 변경 때마다 덮어써지므로 합치면 이 경고가
+    /// 회의 도중 조용히 사라지고, 회수 위험이 있는 세션과 없는 세션을 구분할 수 없게 된다.
+    private(set) var modelRetentionWarning: String?
+
+    /// 예약하지 못한 로케일을 사용자에게 알릴 문구.
+    ///
+    /// 원인을 그대로 싣는다. 예전에는 예약 목록에 없다는 사실만으로 한도 초과라고 단정해,
+    /// 예약이 0개인 기기에서 "5개를 초과했습니다"라는 오진이 나왔다.
+    nonisolated static func retentionWarning(
+        for unreserved: [(locale: Locale, reason: String?)]
+    ) -> String {
+        let detail = unreserved
+            .map { "\($0.locale.identifier)(\($0.reason ?? "원인 미제공"))" }
+            .joined(separator: ", ")
+        return """
+            언어 모델을 붙잡아 두지 못한 채 녹취합니다: \(detail). \
+            이미 설치된 모델로 전사는 되지만, 시스템이 회의 중 모델을 회수하면 전사가 멈출 수 \
+            있습니다.
+            """
+    }
+
     /// 소스가 무음만 흘려보내는 상태인지.
     ///
     /// **권한 거부는 조용히 실패한다.** macOS는 마이크 권한이 거부돼도 콜백을 그대로
@@ -143,6 +166,7 @@ final class MeetingRecorder {
         segments = []
         activeSources = []
         sourceWarning = nil
+        modelRetentionWarning = nil
         sessionTimeOffset = 0
 
         do {
@@ -155,16 +179,35 @@ final class MeetingRecorder {
                 sessions[speaker] = TranscriptionSession(speaker: speaker, locales: locales)
             }
 
+            let modules = await sessions[.me]!.modules
+
             // 예약을 먼저 해야 다운로드한 모델이 정리되지 않는다.
             //
-            // 해제 대상을 **예약을 시도하기 전에** 기록한다. `reserve`는 로케일을 하나씩
-            // 잡다가 한도를 넘으면 던지므로, 성공 후에 기록하면 이미 잡힌 로케일이
-            // teardown의 해제 대상에서 빠져 그대로 붙잡힌 채 남는다. 다음 실행은 한도를
-            // 더 빨리 만나고, 앱을 다시 켜야 풀린다.
-            reservedLocales = locales
-            try await SpeechModelInstaller.reserve(locales: locales)
+            // 실제로 잡힌 것만 해제 대상으로 남긴다 — 예약하지 않은 로케일을 해제하면
+            // false가 돌아올 뿐이지만(실측), 잡힌 로케일이 목록에서 빠지면 그대로 붙잡힌
+            // 채 남아 다음 실행의 한도를 잠식한다.
+            let reservation = await SpeechModelInstaller.reserve(locales: locales)
+            reservedLocales = reservation.reserved
 
-            let modules = await sessions[.me]!.modules
+            // 예약 실패로는 녹취를 막지 않는다. 실측에서 예약 0개 상태로도 최적 오디오 포맷
+            // 질의와 분석기 준비가 성공했으므로, 모델이 이미 설치돼 있으면 진행할 수 있다.
+            // 접는 것은 다운로드를 붙잡을 수단이 없는 미설치 경우뿐이다.
+            if !reservation.isComplete {
+                let installed = await SpeechModelInstaller.isInstalled(modules: modules)
+                guard installed else {
+                    let failed = reservation.unreserved[0]
+                    throw SpeechModelInstaller.InstallError.reservationFailed(
+                        locale: failed.locale,
+                        reason: failed.reason,
+                        requested: locales,
+                        reserved: await SpeechModelInstaller.reservedLocales()
+                    )
+                }
+                // 설치된 모델로 진행하되 회수 위험을 알린다. 조용히 넘어가면 회수 위험이
+                // 있는 세션과 없는 세션을 사용자가 구분할 수 없다.
+                modelRetentionWarning = Self.retentionWarning(for: reservation.unreserved)
+            }
+
             try await SpeechModelInstaller.ensureModels(for: modules) { [weak self] fraction in
                 Task { @MainActor [weak self] in
                     guard let self, case .preparingModel = self.state else { return }
