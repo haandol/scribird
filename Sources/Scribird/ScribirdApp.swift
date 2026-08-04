@@ -79,11 +79,22 @@ final class WindowCoordinator {
             updateChecker: updateChecker
         )
         let settings = settingsWindow
-        self.transcriptWindow = FloatingTranscriptWindow(
+        let transcriptWindow = FloatingTranscriptWindow(
             recorder: recorder,
             settings: hotKeySettings,
             settingsHotKey: settingsHotKeySettings,
             openSettings: { settings.show() }
+        )
+        self.transcriptWindow = transcriptWindow
+
+        // 폴더를 열 때 전사 창이 그 위를 덮지 않게 비켜 준다.
+        //
+        // 이 연결을 여기서 만드는 이유는 조정자가 창을 알지 못하기 때문이다 — 조정자는
+        // "폴더를 연다"만 알고, 그 결과 어떤 창이 앞자리를 넘겨야 하는지는 창을 조립하는
+        // 이곳이 안다.
+        recorder.folderOpener = .yieldingFront(
+            to: .system,
+            yield: { transcriptWindow.yieldFront() }
         )
     }
 

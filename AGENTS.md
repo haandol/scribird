@@ -58,6 +58,32 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - **Append finalized segments immediately.** Do not buffer the transcript in memory until
   session end. Writing per segment is what survives an app crash; the per-segment fsync on
   top of it covers OS panic and power loss.
+- **Never defer a finalized segment's write to a detached task.** Measured: reproducing that
+  order lost utterances in 200 of 200 runs, with 0 persisted while 5 were on screen — the
+  deferred writes hadn't started when the session closed. It fails both ways at once: the
+  append hits a closed handle and the readable transcript was already rendered without that
+  utterance, so the two-format redundancy does not save it. Anything that finalizes a segment
+  must await the write, and stop/rotation must await the arbiter's flush — which is why the
+  arbiter's decision callback is async. A segment the user read on screen must be in the
+  output; arriving after the session closed is counted, never silently dropped.
+- **A failed locale reservation must not block recording.** Measured with 0 reservations
+  held: the audio-format query still returned `16000 Hz, Int16` and the analyzer prepared
+  successfully. Reservation only keeps macOS from reclaiming a model mid-session, so treat
+  its failure as a warning whenever the model is already installed, and fail the session
+  only when the model is absent (nothing to hold the download with). Reclaim this app's own
+  leftover reservations and retry before giving up — reservations outlive the process
+  (measured: a locale reserved in one run was still listed by a separate run), so a crash
+  otherwise eats the quota until the next launch.
+- **Never infer a reservation failure's cause.** Discarding the thrown error and reporting
+  "reservation limit exceeded" produced a measured misdiagnosis: the limit is 5, the app
+  needs at most 2, and the device had **0** reservations when it claimed the limit was hit.
+  The limit is per app (measured: with one app holding 5 of 5, another still reserved
+  successfully), so this app alone cannot reach it. Carry the reason macOS gave —
+  `SFSpeechErrorDomain` code 11 is the real limit error — plus the requested and
+  currently-reserved locales, or the next occurrence is undiagnosable too.
+- **Judge a reservation by the reserved list, not by the return value.** `reserve` is
+  set-semantics and returns `false` for an already-reserved locale (measured), so reading
+  the return value as failure makes every session after the first run reclaim and retry.
 - **Arbitrate multilingual results per token, not per segment.** Segment-level comparison
   deletes whole utterances in code-switching meetings. See `LanguageArbiter` for the three
   rules and the measured failure cases behind them.
@@ -152,7 +178,7 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `open build/Scribird.app`: run the locally built bundle.
 - `./install.sh`: release-build and replace `/Applications/Scribird.app`; restart an
   already running copy for the new build to take effect.
-- `swift test`: run the unit test suite (242 tests, no network required). The device-switch
+- `swift test`: run the unit test suite (no network required). The device-switch
   tests do change the real default output device and restore it; they skip themselves on a
   machine with only one output device.
 

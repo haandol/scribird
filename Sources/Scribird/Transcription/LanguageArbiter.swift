@@ -52,9 +52,14 @@ final class LanguageArbiter {
     }
 
     private var rounds: [UUID: Round] = [:]
-    private let onDecision: (TranscriptSegment) -> Void
+    /// 판정이 끝난 발화를 내보내는 곳.
+    ///
+    /// async인 이유는 저장이 이 경로 안에서 끝나야 하기 때문이다. 동기 콜백으로 두면
+    /// 수신 측이 디스크 쓰기를 별도 태스크로 미루게 되고, 그 태스크가 세션이 닫힌 뒤에
+    /// 실행되면 화면에는 보이는데 파일에는 없는 발화가 생긴다.
+    private let onDecision: (TranscriptSegment) async -> Void
 
-    init(onDecision: @escaping (TranscriptSegment) -> Void) {
+    init(onDecision: @escaping (TranscriptSegment) async -> Void) {
         self.onDecision = onDecision
     }
 
@@ -86,17 +91,20 @@ final class LanguageArbiter {
         let timer = Task { [weak self] in
             try? await Task.sleep(for: Self.arbitrationDelay)
             guard !Task.isCancelled else { return }
-            self?.resolve(key)
+            await self?.resolve(key)
         }
         rounds[key] = Round(segments: [segment], range: segment.range, timer: timer)
         return nil
     }
 
     /// 세션 종료 시 대기 중인 라운드를 모두 확정한다.
-    func flush() {
+    ///
+    /// 호출자가 기다려야 한다 — 이 안에서 저장까지 끝나므로, 기다리지 않으면 마지막
+    /// 발화들이 읽기용 회의록 생성 이후에 도착해 두 산출물에서 함께 빠진다.
+    func flush() async {
         for key in rounds.keys {
             rounds[key]?.timer?.cancel()
-            resolve(key)
+            await resolve(key)
         }
     }
 
@@ -107,10 +115,10 @@ final class LanguageArbiter {
         rounds.removeAll()
     }
 
-    private func resolve(_ key: UUID) {
+    private func resolve(_ key: UUID) async {
         guard let round = rounds.removeValue(forKey: key) else { return }
         for segment in Self.arbitrate(round.segments) {
-            onDecision(segment)
+            await onDecision(segment)
         }
     }
 

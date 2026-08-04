@@ -97,13 +97,28 @@ codec and been played back. This is especially noticeable in Korean.
 
 ### The model download fails or the language can't be selected
 
-The on-device model is downloaded and installed by macOS, not by Scribird. Two distinct
-failures:
+The on-device model is downloaded and installed by macOS, not by Scribird. The messages you
+might see here mean different things:
 
 - **"이 기기에서 지원하지 않습니다"** — macOS does not offer that locale for on-device
   transcription on this hardware. Nothing Scribird can do.
-- **Reservation limit exceeded** — macOS caps how many locales can be reserved at once
-  across all apps. Quit other apps that use on-device speech recognition and try again.
+- **"언어 모델을 붙잡아 두지 못한 채 녹취합니다"** — a warning, not a failure. Recording and
+  transcription continue on the already-installed model. The only risk is that macOS reclaims
+  the model mid-meeting, which would stop transcription partway through; restart the recording
+  if you'd rather not take that chance on a meeting that matters.
+- **"…확보하지 못했고 모델이 아직 설치되지 않아…"** — the model is not installed *and* could
+  not be held for download, so there is nothing to transcribe with. The message carries the
+  reason macOS gave along with which locales were held at the time.
+
+macOS caps how many locales can be held at once, but the cap is per app, and Scribird needs
+only the ones you selected — so it can't reach the cap on its own. Leftover reservations from
+a crash can occupy the quota, and Scribird reclaims its own before retrying, so quitting and
+relaunching is not a fix you should need.
+
+**Read the reason in the message rather than assuming the limit was hit.** A reservation
+failure alone does not prevent transcription when the model is already installed, and an
+older version of this app reported "the reservation limit was exceeded" for unrelated
+failures — including on machines holding no reservations at all.
 
 ### Audio stops being captured mid-meeting
 

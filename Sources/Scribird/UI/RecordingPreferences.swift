@@ -17,6 +17,7 @@ import Foundation
 enum RecordingPreferences {
     private static let languageKey = "transcriptionLanguage"
     private static let savesAudioKey = "savesOriginalAudio"
+    private static let opensFolderKey = "opensSessionFolderOnStop"
 
     /// 사용자가 아무것도 정하지 않았을 때의 언어 구성.
     ///
@@ -25,6 +26,8 @@ enum RecordingPreferences {
     static let defaultLanguage: TranscriptionLanguage = .auto
     /// 원본 저장의 기본값. 재전사 여지를 남기는 쪽을 기본으로 둔다.
     static let defaultSavesAudio = true
+    /// 종료 시 저장 폴더를 여는 기본값. 회의 직후는 산출물을 확인하는 시점이므로 켬이다.
+    static let defaultOpensFolderOnStop = true
 
     /// 저장된 언어 구성. 없거나 해석할 수 없으면 기본값이다.
     ///
@@ -56,6 +59,22 @@ enum RecordingPreferences {
 
     static func save(savesAudio: Bool, to defaults: UserDefaults = .standard) {
         defaults.set(savesAudio, forKey: savesAudioKey)
+    }
+
+    /// 녹취를 끝냈을 때 저장 폴더를 열지 여부. 저장된 값이 없으면 기본값이다.
+    ///
+    /// `savesAudio`와 같은 이유로 `object(forKey:)`로 존재를 먼저 확인한다 — 기본값이
+    /// 켬이라 "끔"과 "정한 적 없음"을 구분해야 하고, 없는 값을 끔으로 읽으면 첫 실행부터
+    /// 폴더가 열리지 않아 이 기능이 없는 것과 같아진다.
+    static func opensFolderOnStop(from defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: opensFolderKey) != nil else {
+            return defaultOpensFolderOnStop
+        }
+        return defaults.bool(forKey: opensFolderKey)
+    }
+
+    static func save(opensFolderOnStop: Bool, to defaults: UserDefaults = .standard) {
+        defaults.set(opensFolderOnStop, forKey: opensFolderKey)
     }
 
     // MARK: - 캡처 장치 선택

@@ -98,6 +98,20 @@ struct SettingsView: View {
                             .buttonStyle(.link)
                     }
                 }
+
+                // 이 항목은 녹취 중에도 잠그지 않는다. 종료 시점에만 읽히는 값이라 이미
+                // 만들어진 전사기나 열려 있는 파일과 어긋나지 않는다 — 언어·원본 저장을
+                // 잠그는 근거가 여기엔 없다.
+                Toggle("녹취를 끝내면 저장 폴더 열기", isOn: Binding(
+                    get: { recorder.opensFolderOnStop },
+                    set: { recorder.opensFolderOnStop = $0 }
+                ))
+
+                Text(recorder.opensFolderOnStop
+                    ? "회의가 끝나면 그 회의의 폴더가 열립니다. 연속된 회의를 녹취할 때 방해가 되면 끄세요."
+                    : "회의가 끝나도 폴더를 열지 않습니다. 전사 화면에 표시된 위치를 눌러 직접 열 수 있습니다.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
 
             Section("버전") {
@@ -172,16 +186,9 @@ struct SettingsView: View {
         }
     }
 
-    /// 세션 디렉터리가 아직 없어도 열 수 있게 루트를 만들어 둔다.
     private func openTranscriptRoot() {
-        guard let documents = try? FileManager.default.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ) else { return }
-        let root = documents.appending(path: "Scribird", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(root)
+        guard let root = recorder.transcriptRootDirectory else { return }
+        // 창구가 없는 폴더를 만들어 주므로 첫 실행에서도 열린다.
+        _ = recorder.folderOpener.open(root)
     }
 }

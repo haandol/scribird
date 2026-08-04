@@ -30,6 +30,13 @@ final class MeetingRecorder {
     /// 직전 세션이 저장된 디렉터리. 메뉴에서 "폴더 열기"에 쓴다.
     private(set) var lastSessionDirectory: URL?
 
+    /// 지금 기록 중인 세션의 디렉터리. 녹취 중이 아니면 nil이다.
+    ///
+    /// 화면에 상시 표시하기 위한 것이다. 이 앱은 메뉴바와 좁은 창으로만 쓰이므로 이 값이
+    /// 없으면 녹취가 실제로 저장되고 있는지 확인할 수단이 사용자에게 없다 — 그리고 회의는
+    /// 한 번 일어나고 끝나므로 그 사실을 회의 후에 알아도 되돌릴 수 없다.
+    private(set) var currentSessionDirectory: URL?
+
     /// 회의 언어 구성. 한국어·영어·둘 다 중에서 고른다.
     ///
     /// 바뀔 때마다 저장한다 — 설정 창의 항목은 앱을 다시 켜도 유지된다.
@@ -47,6 +54,26 @@ final class MeetingRecorder {
             RecordingPreferences.save(savesAudio: savesAudio)
         }
     }
+
+    /// 녹취를 끝냈을 때 저장 폴더를 열지.
+    ///
+    /// 녹취 중에도 바꿀 수 있다 — 종료 시점에만 읽히는 값이라 이미 만들어진 전사기나 열려
+    /// 있는 파일과 어긋나지 않는다. 언어·원본 저장을 잠그는 근거가 여기엔 없다.
+    var opensFolderOnStop = RecordingPreferences.opensFolderOnStop() {
+        didSet {
+            guard opensFolderOnStop != oldValue else { return }
+            RecordingPreferences.save(opensFolderOnStop: opensFolderOnStop)
+        }
+    }
+
+    /// 폴더를 여는 창구. 테스트가 실제 파일 탐색기를 띄우지 않도록 갈아 끼운다.
+    var folderOpener = SessionFolderOpener.system
+
+    /// 세션들이 모이는 저장 루트. 아직 녹취한 적 없을 때 표시하고 여는 대상이다.
+    ///
+    /// 경로를 조립할 수 없는 상황(문서 폴더에 접근할 수 없는 환경)에서도 화면은 떠야 하므로
+    /// 옵셔널이다. 표시할 것이 없다는 뜻이 되지만, 그 실패로 앱을 멈추지는 않는다.
+    var transcriptRootDirectory: URL? { try? TranscriptStore.rootDirectory() }
 
     /// 이번 세션에서 실제로 살아 있는 소스. 권한이 없어 못 켠 소스는 빠진다.
     private(set) var activeSources: Set<Speaker> = []
@@ -235,7 +262,7 @@ final class MeetingRecorder {
             if language.needsArbitration {
                 for speaker in Speaker.allCases {
                     arbiters[speaker] = LanguageArbiter { [weak self] segment in
-                        self?.commit(segment)
+                        await self?.commit(segment)
                     }
                 }
             }
@@ -325,6 +352,9 @@ final class MeetingRecorder {
             self.store = store
             self.audioRecorder = audioRecorder
             self.startedAt = startedAt
+            // 캡처가 실제로 떴을 때만 노출한다. 시작이 실패한 세션의 디렉터리를 보여주면
+            // 녹취되고 있다는 잘못된 확인을 주게 된다.
+            currentSessionDirectory = store.sessionDirectory
             state = .recording
 
             // 캡처가 뜬 뒤에 감시를 켠다. 회의 직전·도중의 장치 전환을 따라가지 않으면
@@ -348,8 +378,12 @@ final class MeetingRecorder {
         let segmentStream = await session.segments()
         runTasks.append(
             Task { @MainActor [weak self] in
+                // 한 발화의 기록이 끝난 뒤 다음 발화를 받는다. 이 루프를 앞서 나가게
+                // 하면(기록을 별도 태스크로 미루면) 화면에는 보이는데 파일에는 없는
+                // 발화가 생긴다. 종료가 이 태스크의 완료를 기다리므로, 여기서 기다리는
+                // 것이 곧 "회의록 생성 전에 기록이 끝나 있음"을 보장한다.
                 for await segment in segmentStream {
-                    self?.handle(segment)
+                    await self?.handle(segment)
                 }
             }
         )
@@ -393,9 +427,11 @@ final class MeetingRecorder {
         // 남은 태스크는 강제로 취소한다.
         for task in runTasks { task.cancel() }
 
-        // 중재 대기 중인 후보를 먼저 확정해야 타임라인이 완전해진다.
+        // 중재 대기 중인 후보를 먼저 확정해야 타임라인이 완전해진다. 이 안에서 저장까지
+        // 끝나므로 기다린다 — 기다리지 않으면 이 발화들이 읽기용 회의록 생성 이후에 도착해
+        // 두 산출물에서 함께 빠진다.
         for arbiter in arbiters.values {
-            arbiter.flush()
+            await arbiter.flush()
         }
 
         // 확정되지 못한 마지막 발화도 저장한다.
@@ -408,6 +444,13 @@ final class MeetingRecorder {
         let audioFiles = audioRecorder?.finish() ?? []
         lastSessionDirectory = await store?.finalize(audioFiles: audioFiles)
         await teardown()
+
+        // 산출물이 확정된 뒤에 연다. 먼저 열면 회의록이 아직 없는 폴더를 보여준다.
+        SessionFolderPolicy.openIfNeeded(
+            finished: lastSessionDirectory,
+            isEnabled: opensFolderOnStop,
+            using: folderOpener
+        )
 
         // 전사는 성공했지만 원본 저장이 실패한 경우. 회의록은 이미 남았으니
         // 실패로 뭉개지 말고 저장 실패만 알린다.
@@ -581,9 +624,11 @@ final class MeetingRecorder {
         let previousStore = store
         let previousStart = startedAt
 
-        // 중재 대기 중인 후보를 확정해야 이전 세션의 시간축이 완전해진다.
+        // 중재 대기 중인 후보를 확정해야 이전 세션의 시간축이 완전해진다. 종료와 같은
+        // 이유로 기다린다 — 경계에서도 이전 세션의 회의록이 곧 생성되므로, 기다리지 않으면
+        // 이 발화들이 그 이후에 도착해 이전 회의의 두 산출물에서 함께 빠진다.
         for arbiter in arbiters.values {
-            arbiter.flush()
+            await arbiter.flush()
         }
         // 확정되지 못한 발화도 이전 세션에 남긴다 — 불완전한 발화가 누락보다 낫다.
         for segment in timeline.flushPending() {
@@ -595,6 +640,14 @@ final class MeetingRecorder {
             // 오디오도 같은 경계에서 갈아 끼운다. 컨테이너를 닫아야 파일이 열린다.
             let audioFiles = audioRecorder?.rotate(to: store.sessionDirectory) ?? []
             lastSessionDirectory = await previousStore?.finalize(audioFiles: audioFiles)
+
+            // 자동 열기는 녹취 종료에만 결부된다 — 경계에서는 열지 않는다.
+            SessionFolderPolicy.openAtBoundary(
+                finished: lastSessionDirectory,
+                isEnabled: opensFolderOnStop,
+                using: folderOpener
+            )
+            currentSessionDirectory = store.sessionDirectory
 
             self.store = store
             // 발화 시각은 새 세션 안에서 0부터 세어야 그 회의만의 회의록이 된다.
@@ -616,7 +669,7 @@ final class MeetingRecorder {
     // MARK: - 내부
 
     /// 전사기에서 갓 나온 결과를 받는다. 다국어면 중재를 거친다.
-    private func handle(_ raw: TranscriptSegment) {
+    private func handle(_ raw: TranscriptSegment) async {
         guard !isAlreadyRecordedBeforeBoundary(raw) else { return }
 
         // 세션 경계를 지났으면 시간축을 현재 세션 기준으로 옮긴다. 중재보다 먼저
@@ -626,13 +679,13 @@ final class MeetingRecorder {
             : raw
 
         guard let arbiter = arbiters[segment.speaker] else {
-            commit(segment)
+            await commit(segment)
             return
         }
         // 중재기가 통과시킨 것만 즉시 반영한다. 확정 결과는 유예 후
         // commit(_:)으로 되돌아온다.
         if let passthrough = arbiter.submit(segment) {
-            commit(passthrough)
+            await commit(passthrough)
         }
     }
 
@@ -654,12 +707,31 @@ final class MeetingRecorder {
     }
 
     /// 채택이 끝난 세그먼트를 타임라인과 디스크에 반영한다.
-    private func commit(_ segment: TranscriptSegment) {
-        if let finalized = timeline.ingest(segment) {
-            let store = self.store
-            Task { await store?.append(finalized) }
-        }
+    ///
+    /// **기록을 분리된 태스크로 미루지 않는다.** 미루면 화면에는 보이는데 파일에는 없는
+    /// 발화가 생긴다 — 미뤄진 기록이 세션이 닫힌 뒤에 실행되면 append는 닫힌 핸들 때문에
+    /// 버려지고, 읽기용 회의록은 그 발화가 빠진 목록으로 이미 생성돼 있어 두 형식에서 함께
+    /// 사라진다. 즉시 기록이 담당하던 이중화가 그 순서에서는 작동하지 않는다.
+    ///
+    /// 실측: 같은 순서를 재현한 프로브에서 200회 중 200회 유실됐고, 화면에 5개가 표시된
+    /// 시점의 저장분이 0개였다 — 드물게 지는 경합이 아니라 기본적으로 지는 순서였다.
+    private func commit(_ segment: TranscriptSegment) async {
+        await Self.commit(segment, to: timeline, store: store)
         segments = timeline.displaySegments
+    }
+
+    /// 확정 발화를 타임라인과 디스크에 반영하는 순서.
+    ///
+    /// 조정자에서 떼어낸 이유는 이 순서가 테스트로 지켜져야 하기 때문이다 — 실제 캡처 없이는
+    /// 조정자를 녹취 상태로 만들 수 없고, 순서가 어긋나면 나타나는 증상(화면에는 있는데 파일에는
+    /// 없음)은 사용자가 회의 후에야 발견한다.
+    static func commit(
+        _ segment: TranscriptSegment,
+        to timeline: TranscriptTimeline,
+        store: TranscriptStore?
+    ) async {
+        guard let finalized = timeline.ingest(segment) else { return }
+        await store?.append(finalized)
     }
 
     private func teardown() async {
@@ -676,6 +748,8 @@ final class MeetingRecorder {
         store = nil
         audioRecorder = nil
         startedAt = nil
+        // 녹취가 끝났으므로 "지금 쓰이는 곳"은 없다. 직전 세션 위치는 따로 남아 있다.
+        currentSessionDirectory = nil
         sessionTimeOffset = 0
         if !reservedLocales.isEmpty {
             await SpeechModelInstaller.release(locales: reservedLocales)

@@ -298,7 +298,7 @@ final class SpeechTranscriptionFixtureTests: XCTestCase {
         for segment in result.segments {
             _ = arbiter.submit(segment)
         }
-        arbiter.flush()
+        await arbiter.flush()
 
         let survivors = decided.value
         XCTAssertFalse(survivors.isEmpty, "중재 결과가 비었다 — 모든 발화가 버려졌다")
@@ -372,7 +372,7 @@ final class SpeechTranscriptionFixtureTests: XCTestCase {
         for segment in result.segments {
             _ = arbiter.submit(segment)
         }
-        arbiter.flush()
+        await arbiter.flush()
 
         let arbitrated = decided.value
             .sorted { $0.range.start.seconds < $1.range.start.seconds }

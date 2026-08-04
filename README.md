@@ -53,7 +53,7 @@ written to disk.
 | **Per-meeting session boundaries** | Starting a new meeting swaps the output files without interrupting capture — you don't lose the opening of the next meeting |
 | **Follows device changes** | Plug in a headset mid-meeting and capture moves with it, without splitting the transcript or the audio files |
 | **Or pin a device** | Choose a specific microphone or output device per source and capture stays there, even when the system default moves |
-| **Global hotkey** | `⌥⌘S` brings up the transcript window from anywhere, and it stays open when it loses focus. Both shortcuts are re-bindable |
+| **Global hotkey** | `⌥⌘S` brings up the transcript window from anywhere, and it stays open when it loses focus. `⌘W` puts it away; closing it doesn't stop a recording. Both shortcuts are re-bindable |
 
 ## System Requirements
 
@@ -124,9 +124,9 @@ and a link to the relevant System Settings pane.
 
 ### Settings
 
-Meeting language, capture devices, original-audio saving, the hotkey, and the update check
-all live in the settings window (`⌘,`). The transcript window keeps only what you look at
-during a meeting.
+Meeting language, capture devices, original-audio saving, whether to open the session folder
+when a recording ends, the hotkey, and the update check all live in the settings window
+(`⌘,`). The transcript window keeps only what you look at during a meeting.
 
 <div align="center">
   <img src="docs/images/settings.png" width="480" alt="Scribird settings window with sections for transcription, capture devices, hotkey, output location, and version" />
@@ -136,6 +136,7 @@ The transcription rows are greyed out here because a recording is in progress �
 language or audio-saving mid-session would contradict the transcribers and file handles that
 already exist, and the window says so rather than failing silently. **Capture devices stay
 editable while recording**, because that's exactly when you notice you picked the wrong one.
+So does the folder-opening toggle, which is only read when a recording stops.
 
 ## Where your data goes
 
@@ -144,6 +145,18 @@ Each session gets its own directory, named for the moment it started:
 ```
 ~/Documents/Scribird/2026-07-31_142530/
 ```
+
+**The transcript window always shows where recordings are stored**, so you can confirm one is
+actually being saved without waiting for it to end. Click it to open that folder. What it
+points at follows the app's state — the session being written to while recording, the last one
+after stopping, and the root above them before you've recorded anything — and the label says
+which of the three you're looking at.
+
+When a recording stops, that session's folder opens on its own, and the transcript window steps
+behind it — it floats above other apps so a meeting can't hide it, but not above something you
+just asked for. Click the transcript window to bring it back above everything. Turn the
+auto-opening off in settings if you record back-to-back meetings and don't want the window.
+Starting a *new session* mid-meeting does not open anything, since you're still in the meeting.
 
 | File | Contents |
 |---|---|

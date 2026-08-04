@@ -10,12 +10,12 @@ usually a bug that produces *silence* rather than an error.
 
 ## Running the app in Xcode or from the command line
 
-Scribird is a Swift Package with no external dependencies. macOS 26 and a Swift 6.2+
-toolchain are required (verified on Swift 6.3.3 / macOS 26.5.2).
+Scribird is a Swift Package with no external dependencies. The required macOS and Swift
+versions are declared in `Package.swift`.
 
 ```bash
 swift build -c debug   # compile with actor data-race checks enabled
-swift test             # 242 tests; STT fixture and device tests need local resources
+swift test             # STT fixture and device tests need local resources
 ./build.sh release     # produce and sign build/Scribird.app
 ./install.sh           # release-build, then install into /Applications
 ```
@@ -25,7 +25,7 @@ its own suite, which needs neither the toolchain nor AWS:
 
 ```bash
 cd plugin/scribird-diarize/skills/multi-speaker-diarize
-/usr/bin/python3 -m unittest discover -s tests   # 112 tests
+/usr/bin/python3 -m unittest discover -s tests
 ```
 
 Two things about running it:
@@ -57,8 +57,9 @@ Design decisions live in [`docs/adr/`](./docs/adr/), and the ADR comes **before*
 
 - **Behavior changes** — update the relevant ADR first, then bring the code to it in the
   same commit. That includes changing a requirement value even when it looks like a one-line
-  constant edit (the stop deadline, the silence threshold, the audio bitrate), because those
-  numbers are contracts the ADR keeps, not tuning knobs.
+  constant edit, because such a number is a contract the ADR keeps, not a tuning knob. The
+  deciding question: would a developer changing this value at will be violating a
+  requirement?
 - **Bug fixes, refactors, docs, formatting** — no ADR needed. A structural change that does
   not alter behavior is scoped by the pull request itself.
 - **New areas** — write the ADR directly. See
@@ -85,21 +86,22 @@ Two conventions matter more here than coverage does:
   invariant in the source and confirm the test fails. Several tests here initially passed
   against deliberately broken code, because the input did not actually exercise the rule.
 
-Some specifics:
+Some traps that are easy to hit here:
 
-- Tests must not reach the network. The update-check tests intercept `URLProtocol` and
-  synthesize responses.
-- `Bundle.main` under `swift test` is the test runner, not the app, so it reports the macOS
-  version. Inject the version being compared rather than reading the bundle.
-- `TranscriptStore` writes under `~/Documents`, so its tests override `HOME` to a temporary
-  directory. Follow that pattern for anything else touching the real filesystem.
-- `LanguageArbiter.arbitrate` and `AudioLevelTracker` are `@MainActor`/actor-isolated. Give
-  the test class matching isolation instead of weakening the source annotation.
-- The device-switch tests are the one exception to "no hardware": they change the real
+- **Tests must not reach the network.** The update-check tests intercept requests and
+  synthesize responses; follow that rather than talking to a real host.
+- **`Bundle.main` under `swift test` is the test runner, not the app**, so it reports the
+  macOS version instead of the app's. Inject the version being compared rather than reading
+  the bundle.
+- **Anything writing under the real home directory must redirect it** to a temporary one.
+  The transcript-store tests override `HOME`; follow that pattern.
+- **Match the source's actor isolation in the test class** instead of weakening the source
+  annotation to make a test compile.
+- **The device-switch tests are the one exception to "no hardware":** they change the real
   default output device and restore it, and skip themselves when the machine has only one
-  output device. Core Audio listener callbacks arrive off the main actor, so collect their
-  values in the lock-wrapped box in `TestSupport` rather than capturing a local `var` —
-  Swift 6 will reject the latter, and the fix is the box, not a weaker annotation.
+  output device. Core Audio callbacks arrive off the main actor, so collect their values in
+  the lock-wrapped box in the shared test support rather than capturing a local `var` —
+  Swift 6 rejects the latter, and the fix is the box, not a weaker annotation.
 
 ### Speech-to-text fixture tests
 
@@ -121,16 +123,16 @@ aren't blocked. If you add a fixture, record its ground-truth text and the keywo
 survive alongside it — the tests compare against those, not against a golden transcript,
 because the on-device model's exact wording changes between OS versions.
 
-One test is skipped with a stated reason rather than passing: a long garbage token from the
-non-matching locale swallows an adjacent region and takes the `insulin` span with it. That's
-a real defect in region assignment, and the skip message says what to fix to re-enable it.
-Don't loosen the assertion to make it pass.
+Some of these tests skip themselves with a stated reason rather than passing, to hold a known
+defect visible instead of asserting the broken behavior is correct. Each skip message says
+what to fix to re-enable it. **Don't loosen an assertion to turn a skip into a pass** — read
+the message and either fix the defect or leave the skip alone.
 
 ### Taking screenshots for the docs
 
 Screenshots live in `docs/images/`. Take them by hand, from a real session you're willing to
-show — open the transcript window with `⌥⌘S`, get it into the state you want, then capture that
-window alone rather than cropping a full-screen shot:
+show — open the transcript window with the global hotkey, get it into the state you want, then
+capture that window alone rather than cropping a full-screen shot:
 
 ```bash
 screencapture -w -o out.png     # click the window; -o drops the drop shadow
@@ -155,10 +157,19 @@ speak and play remote audio, then stop. Verify `transcript.jsonl`, `transcript.m
 and `remote.m4a` exist in `~/Documents/Scribird/<date_time>/`, and that the `.m4a` files
 actually open — a container that was never finalized still has bytes on disk.
 
-**Session rotation.** While recording, press the ✎ button, keep speaking, then stop. Two
+**Session rotation.** While recording, start a new session, keep speaking, then stop. Two
 session directories must exist, each with a playable `.m4a` and a `transcript.md` whose
-timecodes start near `00:00:00`. A second meeting starting at `01:02:05` means the time
-rebase was lost.
+timecodes start near zero. A second meeting whose timecodes carry on from where the first one
+ended means the time rebase was lost. The displayed session location must switch to the new
+directory at the boundary, and **no file-explorer window may open** — the boundary means the
+meeting is continuing.
+
+**Session folder.** The location must be shown in **every** state — while recording (the
+session being written to), after stopping (the last one), and on a machine that has never
+recorded, where it points at the root and opening it must still work even though that folder
+doesn't exist yet. Then confirm stopping opens the folder by itself, turn the setting off, and
+confirm stopping opens nothing while the displayed location still does. Automated tests cover
+the policy but cannot see whether a real window appeared.
 
 **Device switching.** While recording, plug in a headset (or change the output device in
 System Settings › Sound). The remote level meter must resume within about a second, a notice
@@ -167,8 +178,8 @@ session directory, one pair of `.m4a` files, and `transcript.md` timecodes that 
 increasing across the switch. Repeat for the input device with a USB microphone. Then unplug
 the device mid-recording and confirm the other source keeps transcribing.
 
-**Device pinning.** In settings, pick a specific device instead of *시스템 기본* for one
-source. Then change the system default and confirm that source does **not** move while the
+**Device pinning.** In settings, pick a specific device instead of following the system
+default for one source. Then change the system default and confirm that source does **not** move while the
 other one does — pinning is per-source. Change the pinned device while recording and confirm
 capture reconnects without splitting the session. Finally, unplug the pinned device: the app
 must fall back to the system default with a warning, and re-plugging it must return to the
@@ -178,13 +189,27 @@ pinned choice — the selection is kept, not erased.
 the transcript window stays visible. Then set a combination already taken by another app and
 confirm the settings footer reports the failure instead of failing silently.
 
-**Settings.** Open `⌘,`, confirm the transcript window behind it stays visible and recording
-continues, and that the language and audio-saving rows are disabled with a stated reason
-while recording.
+**Window layering and close.** With the transcript window up, stop a recording and confirm the
+session folder appears **in front of** it — the window floats above other apps, so a regression
+here shows up as the folder opening behind it, which the automated tests can't see. Click the
+transcript window and confirm it returns above other apps. Then press `⌘W` with the transcript
+window in front and confirm it goes away while the recording continues (start one first). The
+interception lives on the transcript window only, so also check that recording `⌘W` into a
+shortcut field in settings still captures it as a combination.
+
+**Settings.** Open the settings window with its shortcut, confirm the transcript window behind
+it stays visible and recording continues, and that the rows locked for the duration of a
+session are disabled with a stated reason rather than silently ignoring input.
 
 **Update check.** Press it with the network off and confirm it reports a failure that leaves
 recording unaffected. With the network on, confirm it distinguishes "up to date" from a
 failure — silence for either would be indistinguishable to the user.
+
+**Locale reservation recovery.** Fill the platform's locale-reservation quota with locales
+the app doesn't use, then start a recording with two languages. It must start — the app
+reclaims its own leftover reservations and retries. A failure claiming the reservation limit
+was exceeded is the bug this path exists to prevent. Reservations outlive the process, so a
+signed helper sharing the bundle identifier is one way to set this state up.
 
 ## Coding style
 
@@ -232,24 +257,25 @@ This project follows [Conventional Commits v1.0.0](https://www.conventionalcommi
 The scopes mirror the ADR categories, so a commit and the decision it implements name the same
 area:
 
-| Scope | Covers | Code lives in |
-|---|---|---|
-| `capture` | Microphone and system-audio capture, devices, levels | `Audio/` |
-| `transcription` | Analyzer sessions, language arbitration, model provisioning | `Transcription/` |
-| `session` | Session boundaries, hotkeys, windows, the update check | `UI/`, `MeetingRecorder.swift` |
-| `archive` | Transcript persistence and original-audio recording | `Transcript/`, `Audio/AudioRecorder` |
+| Scope | Covers |
+|---|---|
+| `capture` | Microphone and system-audio capture, devices, levels |
+| `transcription` | Analyzer sessions, language arbitration, model provisioning |
+| `session` | Session boundaries, hotkeys, windows, the update check |
+| `archive` | Transcript persistence and original-audio recording |
 
-The first four are exactly the ADR categories, so a commit and the decision it implements name
-the same area. Two scopes exist outside that mapping because they have no ADR to belong to:
+Those four are exactly the ADR categories. Two scopes exist outside that mapping because they
+have no ADR to belong to:
 
 | Scope | Covers |
 |---|---|
-| `plugin` | The Claude Code / Codex plugin under `plugin/` |
-| `build` | `build.sh`, `install.sh`, `Package.swift`, bundle resources |
+| `plugin` | The Claude Code / Codex plugin |
+| `build` | Build and install scripts, package manifest, bundle resources |
 
-Note that a scope is a *decision* area, not a folder — `archive` covers both
-`Transcript/` and the recorder inside `Audio/`, because one ADR governs them together. When
-unsure, ask which ADR the change answers to; if none does, it's probably `plugin` or `build`.
+Note that a scope is a *decision* area, not a folder — `archive` covers transcript
+persistence and the audio recorder even though they sit in different folders, because one ADR
+governs them together. When unsure, ask which ADR the change answers to; if none does, it's
+probably `plugin` or `build`.
 
 Omit the scope when a change genuinely spans everything — a repository-wide docs pass, for
 instance.
@@ -305,7 +331,7 @@ refactor(capture): share one pump between both capture paths
 perf(transcription): reuse the converter across buffers of one format
 test(capture): assert the tap and the monitor read the same selector
 docs: restructure the README for users and add real screenshots
-chore: bump version to 0.1.3
+chore: bump the version for release
 ```
 
 ### Bad examples

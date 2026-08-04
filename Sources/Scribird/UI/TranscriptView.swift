@@ -192,6 +192,7 @@ struct TranscriptView: View {
                         action: ("개인정보 설정 열기", .privacyRoot)
                     )
                 }
+
                 if let warning = recorder.modelRetentionWarning {
                     // 예약 없이 녹취 중인 세션. 조용히 넘어가면 회수 위험이 있는 세션과
                     // 없는 세션을 구분할 수 없다. 사용자가 열 설정 화면이 없으므로
@@ -350,7 +351,7 @@ struct TranscriptView: View {
                     }
                 }
                 if let directory = recorder.lastSessionDirectory {
-                    Button("저장 폴더 열기") { NSWorkspace.shared.open(directory) }
+                    Button("저장 폴더 열기") { _ = recorder.folderOpener.open(directory) }
                 }
                 Button("닫기") { recorder.dismissError() }
             }
@@ -361,6 +362,16 @@ struct TranscriptView: View {
     }
 
     // MARK: - 푸터
+
+    /// 표시할 저장 위치. 루트를 조립할 수 없는 환경에서만 nil이다.
+    private var displayedSession: (directory: URL, label: String)? {
+        guard let root = recorder.transcriptRootDirectory else { return nil }
+        return SessionFolderPolicy.displayed(
+            current: recorder.currentSessionDirectory,
+            last: recorder.lastSessionDirectory,
+            root: root
+        )
+    }
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -376,16 +387,30 @@ struct TranscriptView: View {
                 )
             }
 
-            HStack(spacing: 12) {
-                if let directory = recorder.lastSessionDirectory {
-                    Button {
-                        NSWorkspace.shared.open(directory)
-                    } label: {
-                        Label("저장 폴더 열기", systemImage: "folder")
+            // 지금 어디에 쓰이고 있는지를 상시 보여준다. 이 앱은 메뉴바와 좁은 창으로만
+            // 쓰이므로, 이것이 없으면 녹취가 실제로 저장되고 있는지 확인할 수단이 없다 —
+            // 그리고 회의는 한 번 일어나고 끝나므로 회의 후에 알아도 되돌릴 수 없다.
+            //
+            // **상태에 따라 사라지지 않는다.** 녹취 중이면 현재 세션, 끝난 뒤면 직전 세션,
+            // 아직 녹취한 적이 없으면 저장 루트를 가리킨다. 조건부로 나타나는 버튼은 사용자가
+            // 그 존재를 학습하지 못하게 만들고, 저장 위치는 첫 녹취 전에도 알고 싶은 것이다.
+            // 어느 것을 보고 있는지는 라벨로 구분한다.
+            if let session = displayedSession {
+                Button {
+                    _ = recorder.folderOpener.open(session.directory)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                        Text(session.label)
+                        Text(session.directory.lastPathComponent)
+                            .monospaced()
                     }
-                    .buttonStyle(.link)
                 }
+                .buttonStyle(.link)
+                .help(session.directory.path(percentEncoded: false))
+            }
 
+            HStack(spacing: 12) {
                 Spacer()
 
                 Text("\(recorder.segments.count)개 발화")

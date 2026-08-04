@@ -13,6 +13,19 @@ actor TranscriptStore {
     private let encoder = JSONEncoder()
     private var segments: [TranscriptSegment.Record] = []
 
+    /// 세션 디렉터리들이 모이는 곳. 화면에 표시하고 열기 위해 세션 없이도 필요하다.
+    ///
+    /// 산출물 위치의 주인이 이 타입이므로 여기서 계산한다 — 같은 경로 조립이 화면 코드에도
+    /// 있으면 한쪽만 고쳐졌을 때 표시된 위치와 실제 저장 위치가 갈라진다.
+    static func rootDirectory() throws -> URL {
+        try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ).appending(path: "Scribird", directoryHint: .isDirectory)
+    }
+
     /// - Parameter startedAt: 세션 시작 시각. 디렉터리 이름과 회의록 헤더에 쓴다.
     init(startedAt: Date) throws {
         let formatter = DateFormatter()
@@ -20,12 +33,7 @@ actor TranscriptStore {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let name = formatter.string(from: startedAt)
 
-        let root = try FileManager.default.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appending(path: "Scribird", directoryHint: .isDirectory)
+        let root = try Self.rootDirectory()
 
         sessionDirectory = root.appending(path: name, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
@@ -41,9 +49,23 @@ actor TranscriptStore {
 
     private let startedAt: Date
 
+    /// 세션이 닫힌 뒤 도착해 기록되지 못한 발화 수.
+    ///
+    /// 늦게 도착하는 것 자체는 정상이지만, 버릴 때 아무 흔적이 없으면 유실이 일어난 사실조차
+    /// 알 수 없다. 호출 순서가 어긋나면 이 값이 0을 넘으므로 테스트가 그것을 잡는다.
+    private(set) var droppedAfterFinalize = 0
+
     func append(_ segment: TranscriptSegment) {
         guard segment.isFinal else { return }
         let record = segment.record
+
+        // 이미 닫힌 세션에는 기록할 수 없다. 읽기용 회의록도 생성이 끝났으므로 여기에
+        // 도착한 발화는 두 형식에서 함께 빠진다 — 조용히 넘기지 않고 센다.
+        guard handle != nil else {
+            droppedAfterFinalize += 1
+            return
+        }
+
         segments.append(record)
 
         guard let handle, var data = try? encoder.encode(record) else { return }

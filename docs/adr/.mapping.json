@@ -50,7 +50,7 @@
         {
           "path": "docs/adr/transcription/0003-model-provisioning-gate.md",
           "status": "Proposed",
-          "summary": "로케일 예약·모델 설치가 끝난 뒤에 오디오 포맷을 확정하고 캡처를 시작한다"
+          "summary": "모델 설치가 끝난 뒤 오디오 포맷을 확정하고 캡처를 시작한다 (예약 실패는 잔여 예약 회수 후 재시도하고, 모델이 설치돼 있으면 경고로 강등)"
         }
       ],
       "dependsOn": [
@@ -101,6 +101,11 @@
           "path": "docs/adr/archive/0002-original-audio-format.md",
           "status": "Proposed",
           "summary": "원본을 소스별로 리샘플링 전 AAC 128k로 저장한다 (64k는 재전사 오인식 발생)"
+        },
+        {
+          "path": "docs/adr/archive/0003-session-output-discoverability.md",
+          "status": "Proposed",
+          "summary": "저장 위치를 항상 표시하고(녹취 중·직전·루트) 종료 시 폴더를 자동으로 연다 (기본 켬, 세션 경계에서는 열지 않음)"
         }
       ],
       "dependsOn": [

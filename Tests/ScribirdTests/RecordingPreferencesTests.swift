@@ -79,6 +79,50 @@ final class RecordingPreferencesTests: XCTestCase {
                       "다시 켠 원본 저장이 복원되지 않았다")
     }
 
+    // MARK: - 종료 시 저장 폴더 열기
+
+    /// 아무것도 정하지 않은 사용자도 회의가 끝나면 산출물을 볼 수 있어야 한다.
+    func test_opensFolderOnStop_withNothingStored_isOn() {
+        XCTAssertTrue(RecordingPreferences.opensFolderOnStop(from: defaults),
+                      "저장값이 없을 때 자동 열기가 꺼져 이 기능이 없는 것과 같아진다")
+    }
+
+    /// **끔이 유지되는 것이 여기서도 핵심이다.**
+    ///
+    /// 기본값이 켬인 항목은 "정한 적 없음"과 "끔"을 구분해야 한다. 구분하지 못하면 끈
+    /// 사용자의 선택이 매번 되살아나 연속 회의마다 창이 열린다.
+    func test_savedOpensFolderOff_isRestored() {
+        RecordingPreferences.save(opensFolderOnStop: false, to: defaults)
+
+        XCTAssertFalse(RecordingPreferences.opensFolderOnStop(from: defaults),
+                       "끈 자동 열기가 켜진 상태로 복원돼 회의마다 창이 끼어든다")
+    }
+
+    func test_savedOpensFolderOn_isRestored() {
+        RecordingPreferences.save(opensFolderOnStop: false, to: defaults)
+        RecordingPreferences.save(opensFolderOnStop: true, to: defaults)
+
+        XCTAssertTrue(RecordingPreferences.opensFolderOnStop(from: defaults),
+                      "다시 켠 자동 열기가 복원되지 않았다")
+    }
+
+    /// 세 항목이 서로의 저장값을 밟지 않는다.
+    ///
+    /// 같은 저장소를 공유하므로 키가 겹치면 한 항목을 바꿀 때 다른 항목이 함께 바뀐다.
+    /// 그 사고는 "원본 저장을 껐는데 폴더도 안 열린다" 같은 형태로 나타나 원인을 찾기 어렵다.
+    func test_eachPreference_isIndependent() {
+        RecordingPreferences.save(savesAudio: false, to: defaults)
+        RecordingPreferences.save(opensFolderOnStop: true, to: defaults)
+        RecordingPreferences.save(language: .korean, to: defaults)
+
+        XCTAssertFalse(RecordingPreferences.savesAudio(from: defaults),
+                       "원본 저장이 다른 항목에 밟혔다")
+        XCTAssertTrue(RecordingPreferences.opensFolderOnStop(from: defaults),
+                      "자동 열기가 다른 항목에 밟혔다")
+        XCTAssertEqual(RecordingPreferences.language(from: defaults), .korean,
+                       "언어 구성이 다른 항목에 밟혔다")
+    }
+
     // MARK: - 손상된 저장값
 
     /// 허용된 값 집합 밖의 언어는 기본값으로 되돌린다.
