@@ -20,10 +20,13 @@ extension Speaker {
     /// `displayName`("나"/"상대방")과 다르다. 그쪽은 회의록에서 누가 말했는지를 가리키고,
     /// 이쪽은 어느 장치 경로가 문제인지를 가리킨다 — "상대방를 새 장치로 다시 연결하지
     /// 못했습니다"는 사용자가 확인할 대상을 알려주지 못한다.
-    var captureLabel: String {
+    var captureLabel: String { captureLabel(language: .current) }
+
+    /// 언어를 지정해 읽는다. 테스트가 실행 환경의 시스템 언어에 좌우되지 않으려면 필요하다.
+    func captureLabel(language: AppLanguage) -> String {
         switch self {
-        case .me: "마이크"
-        case .remote: "시스템 오디오"
+        case .me: tr("마이크", "Microphone", language: language)
+        case .remote: tr("시스템 오디오", "System audio", language: language)
         }
     }
 }
@@ -39,4 +42,8 @@ extension AudioDeviceMonitor.Change {
 
     /// 캡처 소스를 가리키는 이름. 화자 쪽과 같은 표를 쓴다.
     var captureLabel: String { speaker.captureLabel }
+
+    func captureLabel(language: AppLanguage) -> String {
+        speaker.captureLabel(language: language)
+    }
 }

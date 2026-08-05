@@ -22,15 +22,20 @@ final class MicrophoneCapture: CaptureSource, @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .noInputDevice:
-                "사용할 수 있는 마이크를 찾지 못했습니다. 시스템 설정 > 사운드에서 입력 장치를 확인해 주세요."
+                tr("사용할 수 있는 마이크를 찾지 못했습니다. 시스템 설정 > 사운드에서 입력 장치를 확인해 주세요.",
+                   "No usable microphone was found. Check the input device in System Settings › Sound.")
             case .permissionDenied:
-                "마이크 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 Scribird를 허용해 주세요."
+                tr("마이크 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 Scribird를 허용해 주세요.",
+                   "Microphone access is required. Allow Scribird under System Settings › Privacy & Security › Microphone.")
             case .engineFailed(let error):
-                "마이크를 열 수 없습니다: \(error.localizedDescription)"
+                tr("마이크를 열 수 없습니다: \(error.localizedDescription)",
+                   "Couldn't open the microphone: \(error.localizedDescription)")
             case .deviceUnavailable:
-                "설정에서 고른 마이크를 찾을 수 없습니다. 연결을 확인하거나 다른 장치를 골라 주세요."
+                tr("설정에서 고른 마이크를 찾을 수 없습니다. 연결을 확인하거나 다른 장치를 골라 주세요.",
+                   "The microphone chosen in settings wasn't found. Check the connection or pick another device.")
             case .deviceSelectionFailed(let status):
-                "고른 마이크로 전환할 수 없습니다. (코드 \(status))"
+                tr("고른 마이크로 전환할 수 없습니다. (코드 \(status))",
+                   "Couldn't switch to the chosen microphone. (code \(status))")
             }
         }
 

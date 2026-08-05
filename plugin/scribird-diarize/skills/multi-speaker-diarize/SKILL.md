@@ -3,7 +3,7 @@ name: multi-speaker-diarize
 description: >
   Scribird가 저장한 회의 녹음을 로컬 AWS 자격 증명으로 AWS Transcribe에 올려 다중
   화자 분리(speaker diarization)를 돌리고, 기존 온디바이스 전사(transcript.jsonl)와
-  대조해 `상대방`을 `상대방 A/B/C`로 세분화한 회의록과 전사 차이 리포트를 만든다.
+  대조해 `Remote`를 `Remote A/B/C`로 세분화한 회의록과 전사 차이 리포트를 만든다.
   사용자가 회의록에서 여러 참석자를 구분하고 싶다고 할 때, 녹음 파일의 화자를
   나누고 싶다고 할 때, 또는 AWS Transcribe·diarization·화자 분리·화자 구분·speaker
   label을 언급할 때 반드시 이 스킬을 쓴다. `~/Documents/Scribird/` 아래 세션,
@@ -23,7 +23,7 @@ Scribird는 회의 오디오를 **두 갈래로 따로** 받는다. 마이크는
 문제는 `remote`다. Zoom·Teams는 참석자별 스트림을 **믹스다운한 뒤** 시스템 오디오로
 넘기므로, 5명이 참석해도 `remote.m4a` 안에서는 한 덩어리다. 이 스킬은 그 덩어리에 AWS
 Transcribe의 speaker partitioning을 붙여 화자 경계를 얻고, **이미 있는 온디바이스
-전사에 그 경계만 겹쳐** `상대방 A/B/C`로 쪼갠다.
+전사에 그 경계만 겹쳐** `Remote A/B/C`로 쪼갠다.
 
 ```mermaid
 flowchart LR
@@ -38,7 +38,7 @@ flowchart LR
 | | 출처 | 성질 |
 |---|---|---|
 | `me` vs `remote` | 오디오 경로 | **사실** — 추론이 아니다 |
-| `상대방 A` vs `상대방 B` | AWS Transcribe | **추정** — 틀릴 수 있다 |
+| `Remote A` vs `Remote B` | AWS Transcribe | **추정** — 틀릴 수 있다 |
 | 발화 텍스트 | 온디바이스 전사 | 회의 언어에 맞춰 돌아간 결과 |
 
 그래서 텍스트를 AWS 것으로 갈아치우지 않는다. AWS는 화자 경계를 얻으려고 부른 것이지
@@ -165,8 +165,8 @@ jq -r '.locale' ~/Documents/Scribird/<세션>/transcript.jsonl | sort -u
 회의록 본문은 로컬 전사를 그대로 두었다. 고칠 것이 있으면 어느 시각의 무엇인지 알려
 주고 고칠지 **물어본다** — 임의로 덮어쓰지 않는다.
 
-**화자 이름이 뒤집혔을 가능성.** 이름은 발화량 순서다 — `상대방 A`가 가장 많이 말한
-사람이고, `me` 소스에서는 최대 발화자가 `나`다. 내가 거의 듣고만 있던 회의에서는
+**화자 이름이 뒤집혔을 가능성.** 이름은 발화량 순서다 — `Remote A`가 가장 많이 말한
+사람이고, `me` 소스에서는 최대 발화자가 `Me`다. 내가 거의 듣고만 있던 회의에서는
 뒤집히므로, 리포트의 발화 시간 표를 보여주고 사용자가 판단하게 한다.
 
 **감지 화자 수가 10명이면(스트리밍)** 상한에 걸려 잘렸을 수 있다. 배치로 다시 돌리면

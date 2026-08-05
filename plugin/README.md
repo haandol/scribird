@@ -67,7 +67,7 @@ scribird/
 
 ### scribird-diarize
 
-`remote.m4a`를 AWS Transcribe로 화자 분리해 `상대방`을 `상대방 A/B/C`로 세분화한다.
+`remote.m4a`를 AWS Transcribe로 화자 분리해 `Remote`를 `Remote A/B/C`로 세분화한다.
 텍스트는 온디바이스 전사를 유지하고, 두 전사가 다르게 적은 곳을 전부 목록으로 남긴다.
 
 앱이 화자를 2분리로 두는 이유와 이 플러그인이 그 상한을 넘는 방식은
@@ -127,7 +127,7 @@ cd plugin/scribird-diarize/skills/multi-speaker-diarize
   | 단어 단위 대조 제거 (문장 유사도만) | 2 |
   | 한글 NFC 정규화 제거 | 1 |
   | 근거 없는 구간을 유사도 0.0으로 처리 | 1 |
-  | `me` 소스의 `나` 라벨 규칙 제거 | 1 |
+  | `me` 소스의 `Me` 라벨 규칙 제거 | 1 |
   | `MaxSpeakerLabels` 누락 | 2 |
   | us-east-1에 `LocationConstraint` 전달 | 1 |
   | 승인(`--yes`) 없이 업로드 | 1 |

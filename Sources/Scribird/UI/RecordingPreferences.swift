@@ -77,6 +77,26 @@ enum RecordingPreferences {
         defaults.set(opensFolderOnStop, forKey: opensFolderKey)
     }
 
+    // MARK: - 화면 언어
+
+    private static let appLanguageKey = "interfaceLanguage"
+
+    /// 사용자가 고른 화면 언어. nil이면 시스템 언어를 따른다.
+    ///
+    /// **"정한 적 없음"과 특정 언어를 구분해야 한다.** 없는 값을 한국어로 읽으면 영어권 사용자가
+    /// 한국어 화면에서 언어 설정을 찾아야 하고, 그것이 이 기능이 풀려는 문제 그 자체다. 반대로
+    /// 사용자가 명시적으로 고른 값은 시스템 언어가 바뀌어도 유지된다.
+    static func appLanguage(from defaults: UserDefaults = .standard) -> AppLanguage? {
+        guard let raw = defaults.string(forKey: appLanguageKey) else { return nil }
+        // 알 수 없는 값이면 정한 적 없는 것으로 다룬다 — 시스템 언어로 되돌아가는 것이 읽을 수
+        // 없는 화면에 갇히는 것보다 낫다.
+        return AppLanguage(rawValue: raw)
+    }
+
+    static func save(appLanguage: AppLanguage, to defaults: UserDefaults = .standard) {
+        defaults.set(appLanguage.rawValue, forKey: appLanguageKey)
+    }
+
     // MARK: - 저장 위치
 
     private static let transcriptRootKey = "transcriptRootPath"

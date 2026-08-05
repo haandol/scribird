@@ -171,6 +171,25 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   registering inside it left the shortcut dead until the menu-bar icon was clicked once —
   and because registration never ran, the existing failure notice did not surface it
   either. Anything that must work before any UI is drawn belongs in the app delegate.
+- **Screen strings are translated; archive strings are not.** The interface language is
+  user-selectable (Korean/English, defaulting to the system language), so every user-facing
+  string needs both. The transcript file is the opposite: its speaker labels and headings are
+  fixed English regardless of that setting, because the file outlives the session and other
+  tools read it — the diarization plugin in this repo picks its own labels to match. If the
+  archive format followed the setting, one folder would end up holding two vocabularies and a
+  reader could not tell which setting produced a given file. The machine-readable speaker field
+  is unchanged by all of this; only human-readable text is in scope.
+- **Put both languages on adjacent lines, never in separate files.** A string that exists in
+  only one language is invisible to whoever doesn't use that language, so the gap never shows up
+  in development. Keeping the pair together makes a missing half a compile error instead.
+- **Error messages must be translated too.** They are the part that matters most: this app's
+  failures are mostly permission problems, permissions fail silently, and the message is the
+  only path by which a user can fix one. A screen that is translated except when something goes
+  wrong defeats the point.
+- **Test wording by language, never by the machine's locale.** Assertions that hard-code Korean
+  text pass or fail depending on the system language of whoever runs them. Pass the language
+  explicitly, or assert the rule (two labels differ, four buttons are distinct) instead of the
+  words.
 - **Never fetch without the user asking.** The update check is the only network call in
   the app, and it fires only from the button press. Do not add a launch check, a periodic
   check, or a preference that enables one — even defaulted off, that turns "this app makes
@@ -264,6 +283,10 @@ Carbon event target nor a live capture rotation exists under `swift test`:
 - Press the version check with the network off and confirm it reports a failure that
   leaves recording unaffected. With the network on, confirm it distinguishes "up to date"
   from a failure — silence for either would be indistinguishable to the user.
+- Switch the interface language in settings and confirm the transcript window behind it
+  changes immediately — the strings come from a global, so a missing observation dependency
+  leaves the window in the old language until it is reopened. Then stop a recording and confirm
+  `transcript.md` still uses English speaker labels: that file must not follow the setting.
 - Point the save location at another folder, record, and confirm the session lands there and
   that the footer path matches. Then point it at a removable volume, eject it, and start
   recording: it must record into the default location, say why, and still list the chosen

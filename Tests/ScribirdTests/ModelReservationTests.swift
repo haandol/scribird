@@ -256,7 +256,9 @@ final class ModelReservationTests: XCTestCase {
         )
 
         let message = error.errorDescription ?? ""
-        XCTAssertTrue(message.contains("없음"),
+        // 예약이 없다는 사실이 두 언어 모두에서 드러나야 한다 — 한쪽만 적히면 그 언어를 쓰지
+        // 않는 사용자에게는 관측된 오진이 그대로 재현된다.
+        XCTAssertTrue(message.contains("없음") || message.lowercased().contains("none"),
                       "예약이 0개인 상태가 문구에 드러나지 않는다 — 관측된 오진이 이 상태였다")
     }
 

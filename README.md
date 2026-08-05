@@ -21,9 +21,10 @@ Transcription and storage both happen on your machine. **Neither the meeting aud
 transcript ever leaves the device.** The app makes exactly one network request, and only
 when you press *Check for updates* in settings — see [Network use](#network-use).
 
-The app's interface is in Korean. Where this document names a button, a setting, or a speaker
-label, it quotes the Korean the app actually draws and puts the English alongside — so that what
-you read here matches what you see on screen.
+The interface is available in **Korean and English**, following your system language by default
+and switchable in settings. Screenshots in this document were taken with the Korean interface, so
+where it names a button it quotes that Korean and puts the English alongside — what you see on
+screen depends on your language setting.
 
 > [!NOTE]
 > A separate, opt-in [plugin](#optional-splitting-remote-into-individual-speakers) for Claude
@@ -53,6 +54,7 @@ written to disk.
 | **Per-meeting session boundaries** | Starting a new meeting swaps the output files without interrupting capture — you don't lose the opening of the next meeting |
 | **Follows device changes** | Plug in a headset mid-meeting and capture moves with it, without splitting the transcript or the audio files |
 | **Or pin a device** | Choose a specific microphone or output device per source and capture stays there, even when the system default moves |
+| **Korean or English interface** | The screen follows your system language and can be switched in settings. Transcript files keep English speaker labels either way, so tools reading them see one vocabulary |
 | **Global hotkey** | `⌥⌘S` brings up the transcript window from anywhere, and it stays open when it loses focus. `⌘W` puts it away; closing it doesn't stop a recording. Both shortcuts are re-bindable |
 
 ## System Requirements
@@ -109,10 +111,10 @@ identifier.
 ## How to use it
 
 1. Click the waveform icon in the menu bar, or press `⌥⌘S`, to bring up the transcript window.
-2. Press **시작** (Start). On first run the language model is downloaded and progress is shown.
+2. Press **시작** / **Start**. On first run the language model is downloaded and progress is shown.
 3. Check that both level meters move — a meter that doesn't move means that source isn't arriving.
 4. When the meeting changes, press **✎** to cut the transcript. Capture is not interrupted.
-5. Press **중지** (Stop). It wraps up within 6 seconds and shows a link to the output folder.
+5. Press **중지** / **Stop**. It wraps up within 6 seconds and shows a link to the output folder.
 
 ### Reading the level meters
 
@@ -124,9 +126,17 @@ and a link to the relevant System Settings pane.
 
 ### Settings
 
-Meeting language, capture devices, original-audio saving, whether to open the session folder
-when a recording ends, the hotkey, and the update check all live in the settings window
-(`⌘,`). The transcript window keeps only what you look at during a meeting.
+Interface language, meeting language, capture devices, original-audio saving, the save
+location, whether to open the session folder when a recording ends, the hotkey, and the update
+check all live in the settings window (`⌘,`). The transcript window keeps only what you look at
+during a meeting.
+
+**The interface is available in Korean and English.** It follows your system language unless
+you pick one, and picking one keeps it even if the system language later changes. Note that this
+is separate from the *meeting* language — you can read an English interface while recording a
+Korean meeting, or the reverse. Speaker labels inside `transcript.md` are always English
+regardless of this setting, because that file is read later by other tools and its vocabulary
+should not depend on a preference.
 
 <div align="center">
   <img src="docs/images/settings.png" width="480" alt="Scribird settings window with sections for transcription, capture devices, hotkey, output location, and version" />
@@ -349,10 +359,12 @@ defaults read com.scribird.app
 
 | Key | Setting | Default |
 |---|---|---|
+| `interfaceLanguage` | Interface language | unset (follow system language) |
 | `transcriptionLanguage` | Meeting language | `auto` (한국어 + English) |
 | `savesOriginalAudio` | Save original audio | `true` |
 | `pinnedInputDeviceUID` | Pinned microphone | unset (follow system default) |
 | `pinnedOutputDeviceUID` | Pinned output device | unset (follow system default) |
+| `transcriptRootPath` | Save location | unset (use the default folder) |
 | `hotKeyCode`, `hotKeyModifiers` | Global hotkey (show transcript) | `⌥⌘S` |
 | `settingsHotKeyCode`, `settingsHotKeyModifiers` | Open settings | `⌘,` |
 

@@ -79,15 +79,21 @@ actor TranscriptStore {
         return sessionDirectory
     }
 
+    /// 읽기용 회의록을 만든다.
+    ///
+    /// **문구가 화면 언어를 따르지 않는다.** 이 파일은 나중에 다른 도구와 사람이 함께 읽으므로,
+    /// 형식이 설정에 의존하면 한 폴더 안에서 어휘가 섞이고 읽는 쪽은 어느 설정으로 만들어졌는지
+    /// 알 수 없다. 날짜만 시스템 로케일을 따른다 — 그것은 어휘가 아니라 사람이 시각을 읽는
+    /// 방식이고, 도구는 기계가 읽는 형식에서 시각을 가져간다.
     private func renderMarkdown(audioFiles: [URL]) -> String {
         let header = startedAt.formatted(date: .long, time: .shortened)
-        var lines = ["# 회의록 — \(header)", ""]
+        var lines = ["# Meeting Transcript — \(header)", ""]
 
         if !audioFiles.isEmpty {
-            lines.append("원본 오디오: " + audioFiles.map { url in
+            lines.append("Original audio: " + audioFiles.map { url in
                 let name = url.lastPathComponent
                 let label = Speaker(rawValue: url.deletingPathExtension().lastPathComponent)?
-                    .displayName ?? name
+                    .archiveName ?? name
                 return "[\(label)](\(name))"
             }.joined(separator: " · "))
             lines.append("")
@@ -98,7 +104,7 @@ actor TranscriptStore {
         // 두 언어가 섞인 회의였다면 머리말에 적어 둔다.
         let languages = Set(sorted.compactMap(\.locale)).sorted()
         if languages.count > 1 {
-            lines.append("인식 언어: " + languages.joined(separator: ", "))
+            lines.append("Languages: " + languages.joined(separator: ", "))
             lines.append("")
         }
 
@@ -111,7 +117,7 @@ actor TranscriptStore {
 
         func flush() {
             guard let speaker = currentSpeaker, !buffer.isEmpty else { return }
-            var heading = "**\(speaker.displayName)** `\(formatTimecode(blockStart))`"
+            var heading = "**\(speaker.archiveName)** `\(formatTimecode(blockStart))`"
             if languages.count > 1, let currentLocale {
                 heading += " _\(currentLocale)_"
             }

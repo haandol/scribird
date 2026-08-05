@@ -71,8 +71,10 @@ enum CaptureDeviceSelection {
         case .pinnedDeviceMissing:
             let fallback = AudioDeviceMonitor.currentDeviceName(for: change)
             return fallback.map {
-                "\(label)로 고른 장치가 없어 시스템 기본 «\($0)»으로 기록합니다."
-            } ?? "\(label)로 고른 장치를 찾을 수 없어 시스템 기본으로 기록합니다."
+                tr("\(label)로 고른 장치가 없어 시스템 기본 «\($0)»으로 기록합니다.",
+                   "The device chosen for \(label) is missing, so recording uses the system default «\($0)».")
+            } ?? tr("\(label)로 고른 장치를 찾을 수 없어 시스템 기본으로 기록합니다.",
+                    "The device chosen for \(label) wasn't found, so recording uses the system default.")
         }
     }
 }

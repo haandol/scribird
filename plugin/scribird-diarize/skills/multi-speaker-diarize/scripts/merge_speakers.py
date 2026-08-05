@@ -4,7 +4,7 @@
 Scribird의 `transcript.jsonl`은 화자가 `me`/`remote` 두 개다. 오디오 경로가
 화자를 확정하므로 이 2분리는 틀릴 수 없지만, `remote`는 회의 앱이 참석자를
 믹스다운한 뒤의 스트림이라 여러 명이 한 라벨에 뭉쳐 있다. AWS Transcribe의
-speaker partitioning으로 그 안의 화자 경계를 얻어 `상대방 A/B/...`로 쪼갠다.
+speaker partitioning으로 그 안의 화자 경계를 얻어 `Remote A/B/...`로 쪼갠다.
 
 원본 `transcript.jsonl`은 절대 수정하지 않는다 — 이 스크립트의 판정은 확률적
 추정이고, 원본은 오디오 경로가 보장한 사실이다. 사실을 추정으로 덮어쓰면
@@ -368,10 +368,10 @@ def name_speakers(source: str, local: list[LocalSegment]) -> dict[str, str]:
     소스에 따라 이름 규칙이 다른 이유는 두 소스의 성질이 다르기 때문이다.
 
     - `remote`: 시스템 출력이므로 전원이 원격 참석자다. 발화량이 많은 순서로
-      `상대방 A`, `상대방 B`를 준다. 회의에서는 보통 주 발언자가 먼저 눈에
+      `Remote A`, `Remote B`를 준다. 회의에서는 보통 주 발언자가 먼저 눈에
       들어와야 한다.
     - `me`: 마이크 입력이므로 이 기기 사용자가 주인이다. 발화량이 가장 많은
-      화자를 `나`로 두고, 남는 화자는 `대면 참석자 B`로 부른다. 이는
+      화자를 `Me`로 두고, 남는 화자는 `In-person B`로 부른다. 이는
       "상대방이 내 마이크로 함께 들어오는 대면 회의"에서만 생기는 경우이고,
       그때도 기기 주인이 최대 발화자라는 전제에 기댄다. 전제가 깨지는
       배치(내가 거의 듣고만 있는 회의)에서는 라벨이 뒤집히므로, 리포트에
@@ -391,9 +391,9 @@ def name_speakers(source: str, local: list[LocalSegment]) -> dict[str, str]:
 
     for index, (label, _) in enumerate(ordered):
         if source == "me":
-            names[label] = "나" if index == 0 else f"대면 참석자 {alphabet[index % 26]}"
+            names[label] = "Me" if index == 0 else f"In-person {alphabet[index % 26]}"
         else:
-            names[label] = f"상대방 {alphabet[index % 26]}"
+            names[label] = f"Remote {alphabet[index % 26]}"
     return names
 
 
@@ -537,7 +537,7 @@ def format_timecode(seconds: float) -> str:
 
 def display_name(segment: LocalSegment, names: dict[str, dict[str, str]]) -> str:
     """세분화된 이름. 배정에 실패했으면 원래 라벨로 되돌린다."""
-    fallback = {"me": "나", "remote": "상대방"}.get(segment.speaker, segment.speaker)
+    fallback = {"me": "Me", "remote": "Remote"}.get(segment.speaker, segment.speaker)
     if segment.aws_label is None:
         return fallback
     return names.get(segment.speaker, {}).get(segment.aws_label, fallback)

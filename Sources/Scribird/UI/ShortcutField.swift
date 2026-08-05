@@ -25,7 +25,9 @@ struct ShortcutField<Settings: ShortcutEditing>: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Button(settings.isRecording ? "키를 누르세요" : settings.shortcut.displayName) {
+            Button(settings.isRecording
+                   ? tr("키를 누르세요", "Press a key")
+                   : settings.shortcut.displayName) {
                 settings.isRecording.toggle()
             }
             .buttonStyle(.bordered)
@@ -40,7 +42,7 @@ struct ShortcutField<Settings: ShortcutEditing>: View {
             }
 
             if settings.shortcut != settings.defaultShortcut {
-                Button("기본값") { settings.resetToDefault() }
+                Button(tr("기본값", "Default")) { settings.resetToDefault() }
                     .buttonStyle(.link)
             }
         }

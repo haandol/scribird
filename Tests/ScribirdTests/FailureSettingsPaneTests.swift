@@ -109,8 +109,13 @@ final class FailureSettingsPaneTests: XCTestCase {
         ])
         XCTAssertEqual(combined.settingsPane, .microphonePrivacy)
         // 두 사유가 모두 보여야 한다 — 하나만 고쳐도 되는지 사용자가 판단할 근거다.
-        XCTAssertTrue(combined.message.contains("마이크 권한"))
-        XCTAssertTrue(combined.message.contains("오디오 캡처"))
+        //
+        // 문구를 그대로 비교하지 않는다. 화면 언어에 따라 달라지므로, 각 오류가 만든 문구가
+        // 합쳐진 결과에 들어 있는지로 확인한다.
+        let micMessage = MicrophoneCapture.CaptureError.permissionDenied.localizedDescription
+        let tapMessage = SystemAudioCapture.CaptureError.tapCreationFailed(-1).localizedDescription
+        XCTAssertTrue(combined.message.contains(micMessage), "마이크 실패 사유가 빠졌다")
+        XCTAssertTrue(combined.message.contains(tapMessage), "시스템 오디오 실패 사유가 빠졌다")
     }
 
     /// 창을 아는 실패가 뒤에 있어도 그것을 찾아낸다.
@@ -140,14 +145,22 @@ final class FailureSettingsPaneTests: XCTestCase {
     ///
     /// 이 앱이 열 수 있는 창이 넷이므로 "설정 열기"만 있으면 어디로 가는지 알 수 없다.
     func test_openButtonTitle_namesTheDestination() {
-        let titles: [SystemSettingsPane: String] = [
+        let korean: [SystemSettingsPane: String] = [
             .microphonePrivacy: "마이크 설정 열기",
             .audioCapturePrivacy: "오디오 녹음 설정 열기",
             .privacyRoot: "개인정보 설정 열기",
             .soundInput: "사운드 설정 열기",
         ]
-        for (pane, expected) in titles {
-            XCTAssertEqual(pane.openButtonTitle, expected)
+        for (pane, expected) in korean {
+            XCTAssertEqual(pane.openButtonTitle(language: .korean), expected)
+        }
+
+        // 두 언어 모두 목적지를 구분해야 한다 — 한쪽만 번역되면 그 언어 사용자에게는 넷이 같은
+        // 문구로 보인다.
+        for language in AppLanguage.allCases {
+            let titles = SystemSettingsPane.allCases.map { $0.openButtonTitle(language: language) }
+            XCTAssertEqual(Set(titles).count, titles.count,
+                           "\(language)에서 서로 다른 설정 창이 같은 문구를 쓴다")
         }
     }
 }

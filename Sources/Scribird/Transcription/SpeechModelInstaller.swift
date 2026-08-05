@@ -46,20 +46,32 @@ enum SpeechModelInstaller {
         var errorDescription: String? {
             switch self {
             case .localeUnsupported(let locale):
-                "\(locale.identifier) 전사를 이 기기에서 지원하지 않습니다."
+                tr("\(locale.identifier) 전사를 이 기기에서 지원하지 않습니다.",
+                   "This device doesn't support transcription for \(locale.identifier).")
             case .reservationFailed(let locale, let reason, let requested, let reserved):
-                """
-                \(locale.identifier) 언어 모델을 확보하지 못했고 모델이 아직 설치되지 \
-                않아 녹취를 시작할 수 없습니다.
-                원인: \(reason ?? "시스템이 원인을 알려주지 않았습니다.")
-                요청한 언어: \(requested.map(\.identifier).joined(separator: ", "))
-                현재 예약: \(Self.describe(reserved)) (한도 \(AssetInventory.maximumReservedLocales)개)
-                """
+                tr(
+                    """
+                    \(locale.identifier) 언어 모델을 확보하지 못했고 모델이 아직 설치되지 \
+                    않아 녹취를 시작할 수 없습니다.
+                    원인: \(reason ?? "시스템이 원인을 알려주지 않았습니다.")
+                    요청한 언어: \(requested.map(\.identifier).joined(separator: ", "))
+                    현재 예약: \(Self.describe(reserved)) (한도 \(AssetInventory.maximumReservedLocales)개)
+                    """,
+                    """
+                    Couldn't secure the \(locale.identifier) language model, and the model \
+                    isn't installed yet, so recording can't start.
+                    Reason: \(reason ?? "the system did not report a reason.")
+                    Requested: \(requested.map(\.identifier).joined(separator: ", "))
+                    Currently reserved: \(Self.describe(reserved)) (limit \(AssetInventory.maximumReservedLocales))
+                    """
+                )
             }
         }
 
         private static func describe(_ locales: [Locale]) -> String {
-            locales.isEmpty ? "없음" : locales.map(\.identifier).joined(separator: ", ")
+            locales.isEmpty
+                ? tr("없음", "none")
+                : locales.map(\.identifier).joined(separator: ", ")
         }
     }
 

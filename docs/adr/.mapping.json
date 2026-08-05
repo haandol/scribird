@@ -80,6 +80,11 @@
           "path": "docs/adr/session/0004-user-initiated-update-check.md",
           "status": "Proposed",
           "summary": "버전 확인은 사용자가 누를 때만 조회하고 앱이 내려받지는 않는다 (자동 조회 없음)"
+        },
+        {
+          "path": "docs/adr/session/0005-interface-language.md",
+          "status": "Proposed",
+          "summary": "화면 언어를 한국어·영어에서 고르게 하고(기본은 시스템 언어 추종) 산출물 화자 라벨은 영어로 고정한다"
         }
       ],
       "dependsOn": [

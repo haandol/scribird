@@ -118,12 +118,14 @@ final class MeetingRecorder {
     /// - Returns: 바꾸지 못한 이유. 성공하면 nil이다.
     func chooseTranscriptRoot(_ url: URL?) -> String? {
         guard !state.isBusy else {
-            return "녹취 중에는 저장 위치를 바꿀 수 없습니다. 녹취를 끝낸 뒤에 바꿔 주세요."
+            return tr("녹취 중에는 저장 위치를 바꿀 수 없습니다. 녹취를 끝낸 뒤에 바꿔 주세요.",
+                      "The save location can't be changed while recording. Change it after the recording ends.")
         }
         // 고른 시점에 쓸 수 있는지 확인한다. 쓸 수 없는 곳을 조용히 받아들이면 다음 회의가
         // 되돌림으로 시작하고, 사용자는 자기가 고른 곳에 저장되고 있다고 믿는다.
         if let url, !TranscriptRootLocation.isUsable(url) {
-            return "그 폴더에 쓸 수 없습니다. 다른 폴더를 골라 주세요."
+            return tr("그 폴더에 쓸 수 없습니다. 다른 폴더를 골라 주세요.",
+                      "That folder can't be written to. Please pick another one.")
         }
         RecordingPreferences.save(transcriptRoot: url)
         // 저장한 뒤 되읽는다. 저장은 경로 문자열이므로 되읽은 URL이 넘어온 것과 형태가 다를 수
@@ -165,13 +167,20 @@ final class MeetingRecorder {
         for unreserved: [(locale: Locale, reason: String?)]
     ) -> String {
         let detail = unreserved
-            .map { "\($0.locale.identifier)(\($0.reason ?? "원인 미제공"))" }
+            .map { "\($0.locale.identifier)(\($0.reason ?? tr("원인 미제공", "no reason given")))" }
             .joined(separator: ", ")
-        return """
+        return tr(
+            """
             언어 모델을 붙잡아 두지 못한 채 녹취합니다: \(detail). \
             이미 설치된 모델로 전사는 되지만, 시스템이 회의 중 모델을 회수하면 전사가 멈출 수 \
             있습니다.
+            """,
             """
+            Recording without holding the language model: \(detail). \
+            Transcription works with the installed model, but if the system reclaims it \
+            mid-meeting, transcription stops.
+            """
+        )
     }
 
     /// 소스가 무음만 흘려보내는 상태인지.
@@ -602,7 +611,10 @@ final class MeetingRecorder {
             // 설정 창을 싣지 않는다 — 디스크 쓰기 실패는 권한 설정으로 고칠 수 없으므로
             // 보내면 아무것도 할 수 없는 화면을 열게 된다.
             state = .failed(
-                Failure("회의록은 저장했지만 음성 원본 저장에 실패했습니다: \(storageError.localizedDescription)")
+                Failure(tr(
+                    "회의록은 저장했지만 음성 원본 저장에 실패했습니다: \(storageError.localizedDescription)",
+                    "The transcript was saved but the original audio failed to save: \(storageError.localizedDescription)"
+                ))
             )
         } else {
             state = .idle
@@ -679,8 +691,10 @@ final class MeetingRecorder {
         let label = speaker.captureLabel
         await reconnect(
             speaker,
-            notice: deviceName.map { "\(label)를 «\($0)»로 옮겼습니다." }
-                ?? "\(label) 장치가 바뀌어 다시 연결했습니다.",
+            notice: deviceName.map {
+                tr("\(label)를 «\($0)»로 옮겼습니다.", "Moved \(label) to «\($0)».")
+            } ?? tr("\(label) 장치가 바뀌어 다시 연결했습니다.",
+                    "The \(label) device changed, so it was reconnected."),
             using: { try $0.reconnect() }
         )
     }
@@ -700,7 +714,8 @@ final class MeetingRecorder {
         do {
             try reconnecting(capture)
             // 전환 구간의 손실은 복구할 수 없으므로 숨기지 않고 함께 알린다.
-            sourceWarning = notice + " 전환 중 잠깐의 소리는 기록되지 않았습니다."
+            sourceWarning = notice + tr(" 전환 중 잠깐의 소리는 기록되지 않았습니다.",
+                                        " A brief moment of sound during the switch was not recorded.")
         } catch {
             // 한 소스의 재연결 실패가 다른 소스를 멈추지 않는다 — 시작 시점의 실패 격리와
             // 같은 규칙이다. 둘 다 잃었을 때만 세션을 접는다.
@@ -729,8 +744,9 @@ final class MeetingRecorder {
             ?? AudioDeviceMonitor.currentDeviceName(for: change)
         await reconnect(
             speaker,
-            notice: target.map { "\(label)를 «\($0)»로 바꿨습니다." }
-                ?? "\(label) 장치를 바꿨습니다.",
+            notice: target.map {
+                tr("\(label)를 «\($0)»로 바꿨습니다.", "Switched \(label) to «\($0)».")
+            } ?? tr("\(label) 장치를 바꿨습니다.", "Switched the \(label) device."),
             using: { try $0.reconnect(toDeviceUID: selection.deviceUID) }
         )
     }
@@ -753,14 +769,20 @@ final class MeetingRecorder {
 
         let label = speaker.captureLabel
         guard activeSources.isEmpty else {
-            sourceWarning = "\(label)를 새 장치로 다시 연결하지 못해 이 소스의 기록이 멈췄습니다: \(reason)"
+            sourceWarning = tr(
+                "\(label)를 새 장치로 다시 연결하지 못해 이 소스의 기록이 멈췄습니다: \(reason)",
+                "Couldn't reconnect \(label) to the new device, so this source stopped recording: \(reason)"
+            )
             return
         }
         // 남은 소스가 없으면 더 기록할 것이 없다. 확보한 회의록은 저장하고 끝낸다.
         await stop()
         // 장치 재연결 실패는 권한이 아니라 장치 쪽 문제이므로 설정 창을 싣지 않는다.
         state = .failed(
-            Failure("\(label)를 새 장치로 다시 연결하지 못해 녹취를 마쳤습니다: \(reason)")
+            Failure(tr(
+                "\(label)를 새 장치로 다시 연결하지 못해 녹취를 마쳤습니다: \(reason)",
+                "Couldn't reconnect \(label) to the new device, so recording ended: \(reason)"
+            ))
         )
     }
 
@@ -830,7 +852,10 @@ final class MeetingRecorder {
         } catch {
             // 새 산출물을 열지 못하면 경계를 넘지 않는다. 이전 세션에 계속 기록하는
             // 편이 녹취를 잃는 것보다 낫다.
-            sourceWarning = "새 세션을 시작하지 못해 현재 회의록에 계속 기록합니다: \(error.localizedDescription)"
+            sourceWarning = tr(
+                "새 세션을 시작하지 못해 현재 회의록에 계속 기록합니다: \(error.localizedDescription)",
+                "Couldn't start a new session, so recording continues in the current transcript: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -954,9 +979,11 @@ final class MeetingRecorder {
         var errorDescription: String? {
             switch self {
             case .noCompatibleAudioFormat:
-                "전사 모델과 호환되는 오디오 포맷을 찾지 못했습니다."
+                tr("전사 모델과 호환되는 오디오 포맷을 찾지 못했습니다.",
+                   "Couldn't find an audio format compatible with the transcription model.")
             case .noWritableTranscriptRoot:
-                "회의록을 저장할 폴더를 열 수 없습니다. 설정에서 저장 위치를 확인해 주세요."
+                tr("회의록을 저장할 폴더를 열 수 없습니다. 설정에서 저장 위치를 확인해 주세요.",
+                   "Couldn't open a folder to save the transcript. Check the save location in settings.")
             }
         }
     }

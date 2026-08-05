@@ -56,9 +56,9 @@ struct CaptureDevicePicker: View {
     /// 사용자가 확인할 수 있는 정보가 없다.
     private var systemDefaultLabel: String {
         if let name = AudioDeviceMonitor.currentDeviceName(for: change) {
-            "시스템 기본 (\(name))"
+            tr("시스템 기본 (\(name))", "System default (\(name))")
         } else {
-            "시스템 기본"
+            tr("시스템 기본", "System default")
         }
     }
 
@@ -70,18 +70,20 @@ struct CaptureDevicePicker: View {
     private var statusLine: some View {
         if let uid = selectedUID {
             if devices.contains(where: { $0.uid == uid }) {
-                Text("이 장치에 고정됩니다. 시스템 기본이 바뀌어도 따라가지 않습니다.")
+                Text(tr("이 장치에 고정됩니다. 시스템 기본이 바뀌어도 따라가지 않습니다.",
+                         "Pinned to this device. It won't follow changes to the system default."))
                     .captionStyle(.secondary)
             } else {
                 // 저장된 선택이 지금 없는 장치를 가리킨다 — 뽑힌 헤드셋이 대표적이다.
                 Label(
-                    "고른 장치가 연결돼 있지 않아 시스템 기본으로 기록합니다. 다시 연결하면 이 선택으로 돌아갑니다.",
+                    tr("고른 장치가 연결돼 있지 않아 시스템 기본으로 기록합니다. 다시 연결하면 이 선택으로 돌아갑니다.",
+                       "The chosen device isn't connected, so the system default is used. Reconnect it to return to this choice."),
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .captionStyle(.orange)
             }
         } else {
-            Text("장치를 바꾸면 캡처가 따라갑니다.")
+            Text(tr("장치를 바꾸면 캡처가 따라갑니다.", "Capture follows whichever device you switch to."))
                 .captionStyle(.secondary)
         }
     }

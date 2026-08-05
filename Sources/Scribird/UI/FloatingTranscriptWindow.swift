@@ -13,17 +13,20 @@ final class FloatingTranscriptWindow {
     private let recorder: MeetingRecorder
     private let settings: HotKeySettings
     private let settingsHotKey: SettingsHotKeySettings
+    private let languageSettings: AppLanguageSettings
     private let openSettings: () -> Void
 
     init(
         recorder: MeetingRecorder,
         settings: HotKeySettings,
         settingsHotKey: SettingsHotKeySettings,
+        languageSettings: AppLanguageSettings,
         openSettings: @escaping () -> Void
     ) {
         self.recorder = recorder
         self.settings = settings
         self.settingsHotKey = settingsHotKey
+        self.languageSettings = languageSettings
         self.openSettings = openSettings
     }
 
@@ -91,6 +94,7 @@ final class FloatingTranscriptWindow {
             rootView: TranscriptView(
                 recorder: recorder,
                 hotKeySettings: settings,
+                languageSettings: languageSettings,
                 openSettings: openSettings
             )
         )

@@ -13,17 +13,20 @@ final class SettingsWindow {
     private let hotKeySettings: HotKeySettings
     private let settingsHotKeySettings: SettingsHotKeySettings
     private let updateChecker: UpdateChecker
+    private let languageSettings: AppLanguageSettings
 
     init(
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
         settingsHotKeySettings: SettingsHotKeySettings,
-        updateChecker: UpdateChecker
+        updateChecker: UpdateChecker,
+        languageSettings: AppLanguageSettings
     ) {
         self.recorder = recorder
         self.hotKeySettings = hotKeySettings
         self.settingsHotKeySettings = settingsHotKeySettings
         self.updateChecker = updateChecker
+        self.languageSettings = languageSettings
     }
 
     func show() {
@@ -46,7 +49,7 @@ final class SettingsWindow {
             backing: .buffered,
             defer: false
         )
-        window.title = "Scribird 설정"
+        window.title = tr("Scribird 설정", "Scribird Settings")
         // 전사 창과 같은 층에 둔다.
         //
         // 전사 창은 회의 화면에 가려지지 않으려고 `.floating`이다. 설정 창을 기본 레벨로
@@ -71,7 +74,8 @@ final class SettingsWindow {
                 recorder: recorder,
                 hotKeySettings: hotKeySettings,
                 settingsHotKeySettings: settingsHotKeySettings,
-                updateChecker: updateChecker
+                updateChecker: updateChecker,
+                languageSettings: languageSettings
             )
         )
         // 내용이 요구하는 높이로 맞춘다. 고정 높이로 두면 항목이 잘린다.

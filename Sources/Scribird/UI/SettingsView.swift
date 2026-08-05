@@ -9,6 +9,7 @@ struct SettingsView: View {
     let hotKeySettings: HotKeySettings
     let settingsHotKeySettings: SettingsHotKeySettings
     let updateChecker: UpdateChecker
+    let languageSettings: AppLanguageSettings
 
     /// 저장 위치를 바꾸지 못한 사유. 성공하면 nil이다.
     ///
@@ -17,8 +18,31 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("전사") {
-                Picker("회의 언어", selection: Binding(
+            // 화면 언어를 맨 위에 둔다. 읽을 수 없는 화면에서 이 항목을 찾아야 하는 상황이
+            // 이 기능이 풀려는 문제이므로, 찾는 데 스크롤이 필요하지 않아야 한다.
+            Section(tr("화면", "Appearance")) {
+                Picker(tr("화면 언어", "Interface language"), selection: Binding(
+                    get: { languageSettings.language },
+                    set: { languageSettings.update(to: $0) }
+                )) {
+                    // 각 항목을 자기 언어로 적는다 — 읽을 수 없는 언어로 적힌 항목은 고를 수 없다.
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+
+                // 시스템 추종 중임을 알린다. 이것이 없으면 시스템 언어를 바꿨는데 화면이 그대로인
+                // 것을 고장으로 오해한다 — 명시적으로 고른 뒤에는 따라가지 않는 것이 계약이다.
+                Text(languageSettings.isExplicitlyChosen
+                    ? tr("이 언어로 화면을 표시합니다. 회의록 파일의 화자 이름은 언어와 무관하게 영어로 저장됩니다.",
+                         "The interface uses this language. Speaker names in transcript files are always saved in English.")
+                    : tr("시스템 언어를 따르고 있습니다. 위에서 고르면 시스템 언어가 바뀌어도 그 선택을 유지합니다.",
+                         "Following the system language. Pick one above to keep it even when the system language changes."))
+                    .captionStyle(.secondary)
+            }
+
+            Section(tr("전사", "Transcription")) {
+                Picker(tr("회의 언어", "Meeting language"), selection: Binding(
                     get: { recorder.language },
                     set: { recorder.language = $0 }
                 )) {
@@ -28,7 +52,7 @@ struct SettingsView: View {
                 }
                 .disabled(recorder.state.isBusy)
 
-                Toggle("음성 원본 저장", isOn: Binding(
+                Toggle(tr("음성 원본 저장", "Save original audio"), isOn: Binding(
                     get: { recorder.savesAudio },
                     set: { recorder.savesAudio = $0 }
                 ))
@@ -36,44 +60,47 @@ struct SettingsView: View {
 
                 // 잠긴 이유를 적지 않으면 사용자는 앱이 고장 났다고 판단한다.
                 if recorder.state.isBusy {
-                    Text("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 전사기와 파일에 반영되지 않기 때문입니다.")
+                    Text(tr("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 전사기와 파일에 반영되지 않기 때문입니다.",
+                             "Can't be changed while recording — it wouldn't reach the transcribers and files already in use."))
                         .captionStyle(.secondary)
                 }
             }
 
             // 이 섹션은 녹취 중에도 잠그지 않는다. 장치를 잘못 골라 회의가 비어 있는 것을
             // 발견하는 시점이 회의 중이므로, 그때 고칠 수 없으면 목적을 잃는다.
-            Section("캡처 장치") {
+            Section(tr("캡처 장치", "Capture devices")) {
                 CaptureDevicePicker(
                     recorder: recorder,
                     change: .input,
-                    title: "마이크 (나)"
+                    title: tr("마이크 (나)", "Microphone (Me)")
                 )
                 CaptureDevicePicker(
                     recorder: recorder,
                     change: .output,
-                    title: "시스템 오디오 (상대방)"
+                    title: tr("시스템 오디오 (상대방)", "System audio (Remote)")
                 )
 
                 if recorder.state.isBusy {
-                    Text("녹취 중에 바꾸면 그 소스만 새 장치로 다시 연결됩니다. 회의록은 끊기지 않습니다.")
+                    Text(tr("녹취 중에 바꾸면 그 소스만 새 장치로 다시 연결됩니다. 회의록은 끊기지 않습니다.",
+                             "Changing this while recording reconnects only that source. The transcript is not interrupted."))
                         .captionStyle(.secondary)
                 }
             }
 
-            Section("단축키") {
-                LabeledContent("전사 창 띄우기") {
+            Section(tr("단축키", "Shortcuts")) {
+                LabeledContent(tr("전사 창 띄우기", "Show transcript window")) {
                     ShortcutField(settings: hotKeySettings)
                 }
                 if let error = hotKeySettings.registrationError {
                     Label(error, systemImage: "keyboard.badge.exclamationmark")
                         .captionStyle(.orange)
                 } else {
-                    Text("다른 앱을 쓰는 중에도 이 조합으로 전사 창을 띄웁니다.")
+                    Text(tr("다른 앱을 쓰는 중에도 이 조합으로 전사 창을 띄웁니다.",
+                             "This combination shows the transcript window even while another app is in front."))
                         .captionStyle(.secondary)
                 }
 
-                LabeledContent("설정 열기") {
+                LabeledContent(tr("설정 열기", "Open settings")) {
                     ShortcutField(settings: settingsHotKeySettings)
                 }
                 if let error = settingsHotKeySettings.validationError {
@@ -82,29 +109,32 @@ struct SettingsView: View {
                 } else {
                     // 두 단축키의 동작 범위가 다르다는 것을 적는다. 위는 전역이고 이것은 전사
                     // 창이 앞에 있을 때만 듣는데, 같은 자리에 나란히 있으면 구분되지 않는다.
-                    Text("전사 창이 앞에 있을 때 이 조합으로 설정을 엽니다. 다른 앱이 같은 조합을 쓰고 있으면 그 앱이 먼저 가져가므로, 그때는 조합을 바꿔 주세요.")
+                    Text(tr("전사 창이 앞에 있을 때 이 조합으로 설정을 엽니다. 다른 앱이 같은 조합을 쓰고 있으면 그 앱이 먼저 가져가므로, 그때는 조합을 바꿔 주세요.",
+                             "This combination opens settings while the transcript window is in front. If another app has claimed it globally, that app wins — pick a different combination then."))
                         .captionStyle(.secondary)
                 }
             }
 
-            Section("저장 위치") {
+            Section(tr("저장 위치", "Save location")) {
                 transcriptRootRow
 
                 // 이 항목은 녹취 중에도 잠그지 않는다. 종료 시점에만 읽히는 값이라 이미
                 // 만들어진 전사기나 열려 있는 파일과 어긋나지 않는다 — 언어·원본 저장을
                 // 잠그는 근거가 여기엔 없다.
-                Toggle("녹취를 끝내면 저장 폴더 열기", isOn: Binding(
+                Toggle(tr("녹취를 끝내면 저장 폴더 열기", "Open the save folder when recording stops"), isOn: Binding(
                     get: { recorder.opensFolderOnStop },
                     set: { recorder.opensFolderOnStop = $0 }
                 ))
 
                 Text(recorder.opensFolderOnStop
-                    ? "회의가 끝나면 그 회의의 폴더가 열립니다. 연속된 회의를 녹취할 때 방해가 되면 끄세요."
-                    : "회의가 끝나도 폴더를 열지 않습니다. 전사 화면에 표시된 위치를 눌러 직접 열 수 있습니다.")
+                    ? tr("회의가 끝나면 그 회의의 폴더가 열립니다. 연속된 회의를 녹취할 때 방해가 되면 끄세요.",
+                         "When a meeting ends, its folder opens. Turn this off if it gets in the way of back-to-back meetings.")
+                    : tr("회의가 끝나도 폴더를 열지 않습니다. 전사 화면에 표시된 위치를 눌러 직접 열 수 있습니다.",
+                         "Nothing opens when a meeting ends. Click the location shown in the transcript window to open it yourself."))
                     .captionStyle(.secondary)
             }
 
-            Section("버전") {
+            Section(tr("버전", "Version")) {
                 versionRow
                 updateStatusRow
             }
@@ -124,24 +154,24 @@ struct SettingsView: View {
     @ViewBuilder
     private var transcriptRootRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            LabeledContent("회의록") {
+            LabeledContent(tr("회의록", "Transcripts")) {
                 HStack(spacing: 8) {
                     Text(displayedRootPath)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.head)
-                    Button("열기") { openTranscriptRoot() }
+                    Button(tr("열기", "Open")) { openTranscriptRoot() }
                         .buttonStyle(.link)
                 }
             }
 
             HStack(spacing: 8) {
-                Button("폴더 고르기…") { chooseTranscriptRoot() }
+                Button(tr("폴더 고르기…", "Choose folder…")) { chooseTranscriptRoot() }
                     .disabled(recorder.state.isBusy)
                 // 기본 위치를 쓰는 중이면 되돌릴 것이 없다.
                 if recorder.chosenTranscriptRoot != nil {
-                    Button("기본 위치로") { applyRoot(nil) }
+                    Button(tr("기본 위치로", "Use default")) { applyRoot(nil) }
                         .buttonStyle(.link)
                         .disabled(recorder.state.isBusy)
                 }
@@ -150,7 +180,8 @@ struct SettingsView: View {
             // 잠긴 이유를 적지 않으면 사용자는 앱이 고장 났다고 판단한다. 이 항목이 녹취 중에
             // 잠기는 이유는 자동 열기와 다르다 — 이미 열려 있는 파일이 옛 경로를 가리킨다.
             if recorder.state.isBusy {
-                Text("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 회의록과 오디오 파일이 지금 폴더를 가리키고 있습니다.")
+                Text(tr("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 회의록과 오디오 파일이 지금 폴더를 가리키고 있습니다.",
+                         "Can't be changed while recording — the transcript and audio files already open point at the current folder."))
                     .captionStyle(.secondary)
             } else if let error = rootError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -158,10 +189,12 @@ struct SettingsView: View {
             } else if recorder.chosenTranscriptRoot != nil {
                 // 옮기지 않는다는 사실을 적어야 한다 — 바꾼 뒤 옛 회의록이 새 폴더에 없는 것을
                 // 유실로 오해하지 않게 하는 유일한 단서다.
-                Text("이 폴더에 새 회의록을 저장합니다. 이미 저장된 회의록은 옮기지 않고 이전 폴더에 그대로 있습니다.")
+                Text(tr("이 폴더에 새 회의록을 저장합니다. 이미 저장된 회의록은 옮기지 않고 이전 폴더에 그대로 있습니다.",
+                         "New transcripts go in this folder. Ones already saved are not moved and stay in the previous folder."))
                     .captionStyle(.secondary)
             } else {
-                Text("기본 위치에 저장합니다. 동기화되는 폴더나 외장 볼륨을 고르면 그곳에 저장할 수 있습니다.")
+                Text(tr("기본 위치에 저장합니다. 동기화되는 폴더나 외장 볼륨을 고르면 그곳에 저장할 수 있습니다.",
+                         "Saving to the default location. Pick a synced folder or an external volume to save there instead."))
                     .captionStyle(.secondary)
             }
         }
@@ -172,7 +205,7 @@ struct SettingsView: View {
     /// 고른 폴더를 쓸 수 없는 상태에서는 실제로 쓰이는 기본 위치가 나온다 — 표시된 위치와
     /// 저장 위치가 갈라지면 사용자가 회의록을 엉뚱한 곳에서 찾는다.
     private var displayedRootPath: String {
-        recorder.transcriptRootDirectory?.path(percentEncoded: false) ?? "위치를 확인할 수 없습니다"
+        recorder.transcriptRootDirectory?.path(percentEncoded: false) ?? tr("위치를 확인할 수 없습니다", "Location unavailable")
     }
 
     private func chooseTranscriptRoot() {
@@ -181,8 +214,9 @@ struct SettingsView: View {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "선택"
-        panel.message = "회의록과 음성 원본을 저장할 폴더를 고르세요."
+        panel.prompt = tr("선택", "Choose")
+        panel.message = tr("회의록과 음성 원본을 저장할 폴더를 고르세요.",
+                           "Choose a folder for transcripts and original audio.")
         panel.directoryURL = recorder.transcriptRootDirectory
         guard panel.runModal() == .OK, let url = panel.url else { return }
         applyRoot(url)
@@ -195,14 +229,16 @@ struct SettingsView: View {
     // MARK: - 버전
 
     private var versionRow: some View {
-        LabeledContent("현재 버전") {
+        LabeledContent(tr("현재 버전", "Current version")) {
             HStack(spacing: 10) {
-                Text(AppVersion.current?.description ?? "알 수 없음")
+                Text(AppVersion.current?.description ?? tr("알 수 없음", "Unknown"))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
 
                 // 사용자가 누를 때만 조회한다. 시작 시·주기적 조회는 없다.
-                Button(updateChecker.isChecking ? "확인 중…" : "새 버전 확인") {
+                Button(updateChecker.isChecking
+                       ? tr("확인 중…", "Checking…")
+                       : tr("새 버전 확인", "Check for updates")) {
                     Task { await updateChecker.check() }
                 }
                 .disabled(updateChecker.isChecking)
@@ -214,26 +250,29 @@ struct SettingsView: View {
     private var updateStatusRow: some View {
         switch updateChecker.status {
         case .idle:
-            Text("확인을 누를 때만 릴리즈 정보를 조회합니다. 그 외에는 네트워크를 쓰지 않습니다.")
+            Text(tr("확인을 누를 때만 릴리즈 정보를 조회합니다. 그 외에는 네트워크를 쓰지 않습니다.",
+                     "Release info is fetched only when you press check. Nothing else uses the network."))
                 .captionStyle(.secondary)
 
         case .checking:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("릴리즈 정보를 확인하고 있습니다…")
+                Text(tr("릴리즈 정보를 확인하고 있습니다…", "Checking release info…"))
                     .captionStyle(.secondary)
             }
 
         case .upToDate(let current):
-            Label("최신 버전입니다 (\(current))", systemImage: "checkmark.circle.fill")
+            Label(tr("최신 버전입니다 (\(current))", "You're up to date (\(current))"),
+                  systemImage: "checkmark.circle.fill")
                 .captionStyle(.green)
 
         case .updateAvailable(let latest, let url):
             HStack(spacing: 8) {
-                Label("새 버전 \(latest)이 있습니다", systemImage: "arrow.down.circle.fill")
+                Label(tr("새 버전 \(latest)이 있습니다", "Version \(latest) is available"),
+                      systemImage: "arrow.down.circle.fill")
                     .captionStyle(Color.accentColor)
                 // 앱이 내려받지 않는다 — 서명 검증은 Gatekeeper의 몫으로 남긴다.
-                Button("릴리즈 페이지 열기") { NSWorkspace.shared.open(url) }
+                Button(tr("릴리즈 페이지 열기", "Open release page")) { NSWorkspace.shared.open(url) }
                     .buttonStyle(.link)
                     .captionSize()
             }
@@ -242,7 +281,7 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .captionStyle(.orange)
-                Button("닫기") { updateChecker.dismiss() }
+                Button(tr("닫기", "Close")) { updateChecker.dismiss() }
                     .buttonStyle(.link)
                     .captionSize()
             }

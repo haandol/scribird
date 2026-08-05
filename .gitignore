@@ -2,3 +2,7 @@
 build/
 .DS_Store
 *.xcuserstate
+
+# 플러그인 테스트가 남기는 파이썬 바이트코드.
+__pycache__/
+*.pyc

@@ -6,11 +6,17 @@ import SwiftUI
 struct TranscriptView: View {
     let recorder: MeetingRecorder
     let hotKeySettings: HotKeySettings
+    /// 화면 언어. 값을 읽지 않아도 **관찰 대상으로 들고 있어야 한다** — 문구는 전역에서 오므로
+    /// SwiftUI가 언어 변경을 추적할 방법이 이것뿐이고, 없으면 언어를 바꿔도 화면이 그대로다.
+    let languageSettings: AppLanguageSettings
     /// 설정 창을 여는 동작. 팝오버와 떠 있는 창이 같은 창을 연다.
     let openSettings: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        // 언어를 읽어 의존성을 등록한다. `tr`이 전역 값을 보므로, 이 한 줄이 없으면 언어를
+        // 바꿔도 SwiftUI가 이 뷰를 다시 그리지 않는다.
+        let _ = languageSettings.language
+        return VStack(spacing: 0) {
             header
             Divider()
             if recorder.state == .recording {
@@ -59,15 +65,17 @@ struct TranscriptView: View {
             }
             .buttonStyle(.bordered)
             .help(recorder.state == .recording
-                  ? "현재 회의록을 저장하고 새 회의록으로 이어서 기록합니다"
-                  : "화면을 비우고 새 회의록을 준비합니다")
+                  ? tr("현재 회의록을 저장하고 새 회의록으로 이어서 기록합니다",
+                       "Saves this transcript and continues into a new one")
+                  : tr("화면을 비우고 새 회의록을 준비합니다",
+                       "Clears the view and prepares a new transcript"))
             .disabled(isTransitioning || !canStartNewSession)
 
             Button {
                 Task { await recorder.toggle() }
             } label: {
                 Label(
-                    recorder.state == .recording ? "중지" : "시작",
+                    recorder.state == .recording ? tr("중지", "Stop") : tr("시작", "Start"),
                     systemImage: recorder.state == .recording ? "stop.fill" : "record.circle"
                 )
                 .font(.system(size: 12, weight: .medium))
@@ -98,11 +106,11 @@ struct TranscriptView: View {
 
     private var statusTitle: String {
         switch recorder.state {
-        case .idle: "대기 중"
-        case .preparingModel: "언어 모델 준비 중"
-        case .recording: "녹취 중"
-        case .stopping: "마무리 중"
-        case .failed: "오류"
+        case .idle: tr("대기 중", "Idle")
+        case .preparingModel: tr("언어 모델 준비 중", "Preparing language model")
+        case .recording: tr("녹취 중", "Recording")
+        case .stopping: tr("마무리 중", "Finishing")
+        case .failed: tr("오류", "Error")
         }
     }
 
@@ -110,9 +118,10 @@ struct TranscriptView: View {
     private var statusDetail: some View {
         switch recorder.state {
         case .idle:
-            Text("시작을 누르면 바로 기록됩니다")
+            Text(tr("시작을 누르면 바로 기록됩니다", "Press Start and it records right away"))
         case .preparingModel(let fraction):
-            Text("\(recorder.language.displayName) 모델 준비 \(Int(fraction * 100))%")
+            Text(tr("\(recorder.language.displayName) 모델 준비 \(Int(fraction * 100))%",
+                   "Preparing \(recorder.language.displayName) model \(Int(fraction * 100))%"))
         case .recording:
             // 경과 시간은 상태 변화 없이도 흘러야 하므로 뷰가 스스로 째깍이게 한다.
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -120,9 +129,9 @@ struct TranscriptView: View {
                 Text(formatTimecode(context.date.timeIntervalSince(startedAt)))
             }
         case .stopping:
-            Text("회의록 저장 중")
+            Text(tr("회의록 저장 중", "Saving transcript"))
         case .failed:
-            Text("아래 내용을 확인하세요")
+            Text(tr("아래 내용을 확인하세요", "See the details below"))
         }
     }
 
@@ -157,7 +166,8 @@ struct TranscriptView: View {
 
                 if recorder.isSilent(.me) {
                     inlineNotice(
-                        "마이크에서 소리가 들어오지 않습니다. 권한이 거부됐거나 입력 장치가 음소거일 수 있습니다.",
+                        tr("마이크에서 소리가 들어오지 않습니다. 권한이 거부됐거나 입력 장치가 음소거일 수 있습니다.",
+                           "No sound is coming from the microphone. Permission may be denied, or the input device may be muted."),
                         systemImage: "mic.slash.fill",
                         tint: .orange,
                         pane: .microphonePrivacy
@@ -165,7 +175,8 @@ struct TranscriptView: View {
                 } else if recorder.microphoneIsTooQuiet {
                     // 전사는 되지만 저장된 음성이 너무 작아 나중에 듣기 어려운 상태.
                     inlineNotice(
-                        "녹음 레벨이 낮습니다. 마이크에 더 가까이 말하거나 시스템 설정 > 사운드에서 입력 볼륨을 올려 주세요.",
+                        tr("녹음 레벨이 낮습니다. 마이크에 더 가까이 말하거나 시스템 설정 > 사운드에서 입력 볼륨을 올려 주세요.",
+                           "The recording level is low. Speak closer to the microphone, or raise the input volume in System Settings › Sound."),
                         systemImage: "waveform.badge.exclamationmark",
                         tint: .orange,
                         pane: .soundInput
@@ -176,7 +187,8 @@ struct TranscriptView: View {
                     // Core Audio는 권한이 없어도 오류 없이 무음을 흘려보낸다.
                     // 조용히 실패하게 두면 회의가 끝난 뒤에야 알게 된다.
                     inlineNotice(
-                        "시스템 오디오가 무음입니다. 재생 중인 소리가 없거나, 시스템 설정 > 개인정보 보호 및 보안 > 오디오 녹음에서 Scribird가 허용되지 않았을 수 있습니다.",
+                        tr("시스템 오디오가 무음입니다. 재생 중인 소리가 없거나, 시스템 설정 > 개인정보 보호 및 보안 > 오디오 녹음에서 Scribird가 허용되지 않았을 수 있습니다.",
+                           "System audio is silent. Nothing may be playing, or Scribird may not be allowed under System Settings › Privacy & Security › Audio Recording."),
                         systemImage: "speaker.slash.fill",
                         tint: .orange,
                         pane: .audioCapturePrivacy
@@ -254,7 +266,7 @@ struct TranscriptView: View {
                     .foregroundStyle(level.quality.color)
                     .frame(width: 42, alignment: .leading)
             } else {
-                Text("꺼짐")
+                Text(tr("꺼짐", "Off"))
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
             }
@@ -325,12 +337,16 @@ struct TranscriptView: View {
             Image(systemName: "waveform.badge.mic")
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.tertiary)
-            Text(recorder.state == .recording ? "말소리를 기다리고 있습니다" : "녹취를 시작하면 여기에 표시됩니다")
+            Text(recorder.state == .recording
+                 ? tr("말소리를 기다리고 있습니다", "Waiting for speech")
+                 : tr("녹취를 시작하면 여기에 표시됩니다", "Start recording and it appears here"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             Text(recorder.language == .auto
-                ? "마이크는 «나», 스피커 소리는 «상대방»으로 자동 구분됩니다.\n한국어와 영어를 함께 인식하며, 혼자 말해도 기록됩니다."
-                : "마이크는 «나», 스피커 소리는 «상대방»으로 자동 구분됩니다.\n회의 앱 없이 혼자 말해도 기록됩니다.")
+                ? tr("마이크는 «나», 스피커 소리는 «상대방»으로 자동 구분됩니다.\n한국어와 영어를 함께 인식하며, 혼자 말해도 기록됩니다.",
+                     "The microphone is «Me» and speaker output is «Remote», split automatically.\nKorean and English are recognized together, and talking alone is recorded too.")
+                : tr("마이크는 «나», 스피커 소리는 «상대방»으로 자동 구분됩니다.\n회의 앱 없이 혼자 말해도 기록됩니다.",
+                     "The microphone is «Me» and speaker output is «Remote», split automatically.\nTalking alone without a meeting app is recorded too."))
                 .captionStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
@@ -358,9 +374,11 @@ struct TranscriptView: View {
                     Button(pane.openButtonTitle) { pane.open() }
                 }
                 if let directory = recorder.lastSessionDirectory {
-                    Button("저장 폴더 열기") { _ = recorder.folderOpener.open(directory) }
+                    Button(tr("저장 폴더 열기", "Open save folder")) {
+                        _ = recorder.folderOpener.open(directory)
+                    }
                 }
-                Button("닫기") { recorder.dismissError() }
+                Button(tr("닫기", "Close")) { recorder.dismissError() }
             }
             .font(.system(size: 12))
         }
@@ -420,7 +438,7 @@ struct TranscriptView: View {
             HStack(spacing: 12) {
                 Spacer()
 
-                Text("\(recorder.segments.count)개 발화")
+                Text(tr("\(recorder.segments.count)개 발화", "\(recorder.segments.count) utterances"))
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
 
@@ -428,7 +446,7 @@ struct TranscriptView: View {
                 Button {
                     openSettings()
                 } label: {
-                    Label("설정", systemImage: "gearshape")
+                    Label(tr("설정", "Settings"), systemImage: "gearshape")
                 }
                 // `⌘,`는 이 버튼에 붙이지 않는다. SwiftUI의 `.keyboardShortcut`은 메뉴
                 // 시스템을 거치는데 메뉴바 전용 앱에는 메인 메뉴가 없어(실측: NSApp.mainMenu가
@@ -438,7 +456,7 @@ struct TranscriptView: View {
                 Button {
                     NSApplication.shared.terminate(nil)
                 } label: {
-                    Label("종료", systemImage: "power")
+                    Label(tr("종료", "Quit"), systemImage: "power")
                 }
                 .buttonStyle(.link)
             }

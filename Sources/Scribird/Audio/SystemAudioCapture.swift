@@ -35,19 +35,24 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .unsupportedOS:
-                "시스템 오디오 캡처는 macOS 14.4 이상에서만 지원됩니다."
+                tr("시스템 오디오 캡처는 macOS 14.4 이상에서만 지원됩니다.",
+                   "System audio capture requires macOS 14.4 or later.")
             case .noOutputDevice:
-                "시스템 기본 출력 장치를 찾지 못했습니다."
+                tr("시스템 기본 출력 장치를 찾지 못했습니다.", "Couldn't find the system default output device.")
             case .tapCreationFailed(let status):
-                "시스템 오디오 탭을 만들 수 없습니다. 시스템 설정 > 개인정보 보호 및 보안 > 오디오 캡처에서 Scribird를 허용해 주세요. (코드 \(status))"
+                tr("시스템 오디오 탭을 만들 수 없습니다. 시스템 설정 > 개인정보 보호 및 보안 > 오디오 캡처에서 Scribird를 허용해 주세요. (코드 \(status))",
+                   "Couldn't create the system audio tap. Allow Scribird under System Settings › Privacy & Security › Audio Recording. (code \(status))")
             case .aggregateDeviceFailed(let status):
-                "오디오 집계 장치를 만들 수 없습니다. (코드 \(status))"
+                tr("오디오 집계 장치를 만들 수 없습니다. (코드 \(status))",
+                   "Couldn't create the audio aggregate device. (code \(status))")
             case .formatUnavailable:
-                "시스템 오디오의 형식을 확인할 수 없습니다."
+                tr("시스템 오디오의 형식을 확인할 수 없습니다.", "Couldn't determine the system audio format.")
             case .ioProcFailed(let status):
-                "오디오 입력 콜백을 등록할 수 없습니다. (코드 \(status))"
+                tr("오디오 입력 콜백을 등록할 수 없습니다. (코드 \(status))",
+                   "Couldn't register the audio input callback. (code \(status))")
             case .startFailed(let status):
-                "시스템 오디오 캡처를 시작할 수 없습니다. (코드 \(status))"
+                tr("시스템 오디오 캡처를 시작할 수 없습니다. (코드 \(status))",
+                   "Couldn't start system audio capture. (code \(status))")
             }
         }
 

@@ -19,7 +19,8 @@ final class GlobalHotKey: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .unavailable:
-                "단축키를 등록할 수 없습니다. 다른 앱이 같은 조합을 쓰고 있을 수 있습니다."
+                tr("단축키를 등록할 수 없습니다. 다른 앱이 같은 조합을 쓰고 있을 수 있습니다.",
+                   "Couldn't register the shortcut. Another app may already be using this combination.")
             }
         }
     }

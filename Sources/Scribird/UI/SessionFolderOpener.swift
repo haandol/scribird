@@ -85,8 +85,8 @@ enum SessionFolderPolicy {
         last: URL?,
         root: URL
     ) -> (directory: URL, label: String) {
-        if let current { return (current, "기록 중") }
-        if let last { return (last, "직전 회의") }
-        return (root, "저장 폴더")
+        if let current { return (current, tr("기록 중", "Recording to")) }
+        if let last { return (last, tr("직전 회의", "Last meeting")) }
+        return (root, tr("저장 폴더", "Save folder"))
     }
 }

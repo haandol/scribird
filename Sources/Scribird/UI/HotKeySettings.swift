@@ -36,7 +36,8 @@ final class HotKeySettings: ShortcutEditing {
     /// 사용자는 단축키가 바뀐 줄 알지만 아무 조합도 동작하지 않는다.
     func update(to newShortcut: HotKeyShortcut) {
         guard newShortcut.isValid else {
-            registrationError = "Command·Option·Control 중 하나 이상을 포함해야 합니다."
+            registrationError = tr("Command·Option·Control 중 하나 이상을 포함해야 합니다.",
+                                   "Must include at least one of Command, Option, or Control.")
             return
         }
         let previous = shortcut

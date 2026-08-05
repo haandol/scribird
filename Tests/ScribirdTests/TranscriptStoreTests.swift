@@ -170,8 +170,13 @@ final class TranscriptStoreTests: XCTestCase {
                                   encoding: .utf8)
 
         // 같은 화자의 연속 발화는 헤딩 하나 아래로 묶인다.
-        XCTAssertEqual(markdown.components(separatedBy: "**나**").count - 1, 1,
-                       "같은 화자 연속 발화가 단락으로 묶이지 않았다")
+        //
+        // 라벨을 `archiveName`으로 비교한다 — 회의록 형식은 화면 언어와 무관하게 고정이므로,
+        // 문구를 그대로 적으면 이 테스트가 언어 설정에 따라 깨진다.
+        XCTAssertEqual(
+            markdown.components(separatedBy: "**\(Speaker.me.archiveName)**").count - 1, 1,
+            "같은 화자 연속 발화가 단락으로 묶이지 않았다"
+        )
         XCTAssertTrue(markdown.contains("첫 문장. 이어지는 문장."))
     }
 
@@ -184,8 +189,8 @@ final class TranscriptStoreTests: XCTestCase {
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
-        XCTAssertTrue(markdown.contains("**나**"))
-        XCTAssertTrue(markdown.contains("**상대방**"))
+        XCTAssertTrue(markdown.contains("**\(Speaker.me.archiveName)**"))
+        XCTAssertTrue(markdown.contains("**\(Speaker.remote.archiveName)**"))
     }
 
     func test_markdown_splitsWhenLanguageChanges() async throws {
@@ -198,10 +203,13 @@ final class TranscriptStoreTests: XCTestCase {
                                   encoding: .utf8)
 
         // 코드스위칭이 보여야 한다 — 같은 화자라도 언어 경계에서 끊는다.
-        XCTAssertEqual(markdown.components(separatedBy: "**나**").count - 1, 2,
-                       "언어가 바뀌는 지점에서 단락이 끊기지 않았다")
-        XCTAssertTrue(markdown.contains("인식 언어"),
-                      "두 언어가 섞인 회의인데 머리말에 표기가 없다")
+        XCTAssertEqual(
+            markdown.components(separatedBy: "**\(Speaker.me.archiveName)**").count - 1, 2,
+            "언어가 바뀌는 지점에서 단락이 끊기지 않았다"
+        )
+        XCTAssertTrue(markdown.contains("ko-KR"), "인식된 언어가 머리말에 없다")
+        XCTAssertTrue(markdown.contains("en-US"),
+                      "두 언어가 섞인 회의인데 머리말에 둘 다 적히지 않았다")
     }
 
     func test_markdown_ordersBlocksByTime() async throws {
@@ -251,7 +259,7 @@ final class TranscriptStoreTests: XCTestCase {
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
-        XCTAssertFalse(markdown.contains("인식 언어"),
+        XCTAssertFalse(markdown.contains("Languages:"),
                        "단일 언어 회의에 불필요한 언어 표기가 들어갔다")
     }
 }

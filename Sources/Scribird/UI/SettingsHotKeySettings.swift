@@ -42,7 +42,8 @@ final class SettingsHotKeySettings: ShortcutEditing {
     /// 전역 등록이 없으므로 실패할 여지는 유효성뿐이다.
     func update(to newShortcut: HotKeyShortcut) {
         guard newShortcut.isValid else {
-            validationError = "Command·Option·Control 중 하나 이상을 포함해야 합니다."
+            validationError = tr("Command·Option·Control 중 하나 이상을 포함해야 합니다.",
+                                 "Must include at least one of Command, Option, or Control.")
             return
         }
         shortcut = newShortcut

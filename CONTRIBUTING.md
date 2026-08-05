@@ -172,6 +172,13 @@ doesn't exist yet. Then confirm stopping opens the folder by itself, turn the se
 confirm stopping opens nothing while the displayed location still does. Automated tests cover
 the policy but cannot see whether a real window appeared.
 
+**Interface language.** Switch the language in settings and confirm the transcript window
+behind it redraws immediately. The strings come from a global value, so if a view forgets to
+observe the language it stays in the old one until reopened — and that gap is invisible unless
+you watch a second window while switching. Then record briefly, stop, and open `transcript.md`:
+its speaker labels must be `Me`/`Remote` regardless of the language you picked. The file is read
+later by other tools, so its vocabulary is fixed while the screen's is not.
+
 **Save location.** Point the save location at another folder in settings, record, and confirm
 the session directory is created there and the footer path matches. Then point it at a removable
 volume, eject it, and start recording: the session must land in the default location **with a

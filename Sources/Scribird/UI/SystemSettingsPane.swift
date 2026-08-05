@@ -8,7 +8,7 @@ import Foundation
 /// 조용히 실패(아무 창도 열리지 않음)하므로 한곳에 모은다.
 ///
 /// **화면 녹화 창은 없다.** 이 앱은 마이크와 오디오 캡처 권한만 쓴다.
-enum SystemSettingsPane {
+enum SystemSettingsPane: CaseIterable {
     case microphonePrivacy
     case audioCapturePrivacy
     /// 개인정보 보호 및 보안 최상위. 어느 권한이 문제인지 특정할 수 없을 때 쓴다.
@@ -35,12 +35,19 @@ enum SystemSettingsPane {
     ///
     /// 어느 창이 열릴지 버튼에 적어야 한다 — "설정 열기"만 있으면 사용자가 어디로 가는지 모르고,
     /// 이 앱에서 열 수 있는 창이 넷이라 실제로 헷갈린다.
-    var openButtonTitle: String {
+    var openButtonTitle: String { openButtonTitle(language: .current) }
+
+    /// 언어를 지정해 읽는다. 테스트가 실행 환경의 시스템 언어에 좌우되지 않으려면 필요하다.
+    func openButtonTitle(language: AppLanguage) -> String {
         switch self {
-        case .microphonePrivacy: "마이크 설정 열기"
-        case .audioCapturePrivacy: "오디오 녹음 설정 열기"
-        case .privacyRoot: "개인정보 설정 열기"
-        case .soundInput: "사운드 설정 열기"
+        case .microphonePrivacy:
+            tr("마이크 설정 열기", "Open Microphone settings", language: language)
+        case .audioCapturePrivacy:
+            tr("오디오 녹음 설정 열기", "Open Audio Recording settings", language: language)
+        case .privacyRoot:
+            tr("개인정보 설정 열기", "Open Privacy settings", language: language)
+        case .soundInput:
+            tr("사운드 설정 열기", "Open Sound settings", language: language)
         }
     }
 

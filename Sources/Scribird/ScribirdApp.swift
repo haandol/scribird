@@ -19,6 +19,7 @@ struct ScribirdApp: App {
             TranscriptView(
                 recorder: delegate.recorder,
                 hotKeySettings: delegate.hotKeySettings,
+                languageSettings: delegate.languageSettings,
                 openSettings: { delegate.windows.showSettings() }
             )
         } label: {
@@ -42,11 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let hotKeySettings = HotKeySettings()
     let settingsHotKeySettings = SettingsHotKeySettings()
     let updateChecker = UpdateChecker()
+    let languageSettings = AppLanguageSettings()
     lazy var windows = WindowCoordinator(
         recorder: recorder,
         hotKeySettings: hotKeySettings,
         settingsHotKeySettings: settingsHotKeySettings,
-        updateChecker: updateChecker
+        updateChecker: updateChecker,
+        languageSettings: languageSettings
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -69,20 +72,23 @@ final class WindowCoordinator {
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
         settingsHotKeySettings: SettingsHotKeySettings,
-        updateChecker: UpdateChecker
+        updateChecker: UpdateChecker,
+        languageSettings: AppLanguageSettings
     ) {
         self.hotKeySettings = hotKeySettings
         self.settingsWindow = SettingsWindow(
             recorder: recorder,
             hotKeySettings: hotKeySettings,
             settingsHotKeySettings: settingsHotKeySettings,
-            updateChecker: updateChecker
+            updateChecker: updateChecker,
+            languageSettings: languageSettings
         )
         let settings = settingsWindow
         let transcriptWindow = FloatingTranscriptWindow(
             recorder: recorder,
             settings: hotKeySettings,
             settingsHotKey: settingsHotKeySettings,
+            languageSettings: languageSettings,
             openSettings: { settings.show() }
         )
         self.transcriptWindow = transcriptWindow

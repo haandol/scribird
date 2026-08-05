@@ -197,8 +197,8 @@ class SpeakerNamingTests(unittest.TestCase):
         local[0].aws_label = "spk_1"
         local[1].aws_label = "spk_0"
         names = name_speakers("remote", local)
-        self.assertEqual(names["spk_0"], "상대방 A")
-        self.assertEqual(names["spk_1"], "상대방 B")
+        self.assertEqual(names["spk_0"], "Remote A")
+        self.assertEqual(names["spk_1"], "Remote B")
 
     def test_me_source_names_dominant_speaker_as_me(self) -> None:
         """마이크에서는 최대 발화자가 기기 주인이다.
@@ -213,8 +213,8 @@ class SpeakerNamingTests(unittest.TestCase):
         local[0].aws_label = "spk_0"
         local[1].aws_label = "spk_1"
         names = name_speakers("me", local)
-        self.assertEqual(names["spk_0"], "나")
-        self.assertEqual(names["spk_1"], "대면 참석자 B")
+        self.assertEqual(names["spk_0"], "Me")
+        self.assertEqual(names["spk_1"], "In-person B")
 
     def test_unassigned_segments_do_not_get_names(self) -> None:
         local = [segment(0.0, 5.0)]
@@ -228,7 +228,7 @@ class SpeakerNamingTests(unittest.TestCase):
         local[0].aws_label = "spk_1"
         local[1].aws_label = "spk_0"
         names = name_speakers("remote", local)
-        self.assertEqual(names["spk_0"], "상대방 A")
+        self.assertEqual(names["spk_0"], "Remote A")
 
 
 class TextComparisonTests(unittest.TestCase):
@@ -574,10 +574,10 @@ class MergeEndToEndTests(unittest.TestCase):
             by_id = {r["id"]: r for r in records}
 
             # remote가 A/B로 갈렸다.
-            self.assertEqual(by_id["2"]["speaker"], "상대방 A")
-            self.assertEqual(by_id["3"]["speaker"], "상대방 B")
+            self.assertEqual(by_id["2"]["speaker"], "Remote A")
+            self.assertEqual(by_id["3"]["speaker"], "Remote B")
             # me는 손대지 않았다 — 마이크 입력의 화자는 이미 확정이다.
-            self.assertEqual(by_id["1"]["speaker"], "나")
+            self.assertEqual(by_id["1"]["speaker"], "Me")
             # 원래 소스가 남아 있어 추정 없는 2분리로 되돌릴 수 있다.
             self.assertEqual({r["source"] for r in records}, {"me", "remote"})
 
@@ -784,7 +784,7 @@ class ReportTests(unittest.TestCase):
         report = render_report(
             local,
             {"remote": (aws((0.0, 2.0, "spk_0")), 1.5)},
-            {"remote": {"spk_0": "상대방 A"}},
+            {"remote": {"spk_0": "Remote A"}},
         )
         self.assertIn("+1.50초", report)
         self.assertIn("세션 경계", report)

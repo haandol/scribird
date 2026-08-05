@@ -15,6 +15,8 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
+        // 전사 언어는 자기 언어로 적는다 — 화면 언어와 무관하게 어느 언어로 인식되는지가
+        // 이 값의 정보이고, 언어 이름은 그 언어로 적는 것이 관례다.
         case .korean: "한국어"
         case .english: "English"
         case .auto: "한국어 + English"

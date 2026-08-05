@@ -60,7 +60,7 @@ final class UpdateChecker {
         status = .checking
 
         guard let current = currentVersion else {
-            status = .failed("현재 버전을 확인할 수 없습니다.")
+            status = .failed(tr("현재 버전을 확인할 수 없습니다.", "Couldn't determine the current version."))
             return
         }
 
@@ -127,11 +127,13 @@ final class UpdateChecker {
         var errorDescription: String? {
             switch self {
             case .serverError(let code):
-                "릴리즈 정보를 가져오지 못했습니다. (응답 코드 \(code))"
+                tr("릴리즈 정보를 가져오지 못했습니다. (응답 코드 \(code))",
+                   "Couldn't fetch release info. (response code \(code))")
             case .malformedResponse:
-                "릴리즈 정보의 형식을 해석할 수 없습니다."
+                tr("릴리즈 정보의 형식을 해석할 수 없습니다.", "Couldn't parse the release info format.")
             case .malformedVersion(let raw):
-                "릴리즈 버전 표기를 해석할 수 없습니다: \(raw)"
+                tr("릴리즈 버전 표기를 해석할 수 없습니다: \(raw)",
+                   "Couldn't parse the release version string: \(raw)")
             }
         }
     }

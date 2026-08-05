@@ -214,9 +214,11 @@ final class AudioRecorder: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .converterUnavailable:
-                "오디오 원본을 저장할 형식으로 변환할 수 없습니다."
+                tr("오디오 원본을 저장할 형식으로 변환할 수 없습니다.",
+                   "Couldn't convert the original audio into a format that can be saved.")
             case .fileNotFinalized(let name):
-                "\(name)을 재생 가능한 파일로 마무리하지 못했습니다."
+                tr("\(name)을 재생 가능한 파일로 마무리하지 못했습니다.",
+                   "Couldn't finalize \(name) into a playable file.")
             }
         }
     }
