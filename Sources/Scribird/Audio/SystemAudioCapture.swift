@@ -22,8 +22,8 @@ import Speech
 ///
 /// 구조: 탭을 만들고 → 그 탭을 품은 비공개 aggregate device를 만들고 →
 /// 그 장치에 IO 프로시저를 붙여 샘플을 받는다.
-final class SystemAudioCapture: AudioLevelSource, @unchecked Sendable {
-    enum CaptureError: LocalizedError {
+final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
+    enum CaptureError: LocalizedError, SettingsPaneProviding {
         case unsupportedOS
         case noOutputDevice
         case tapCreationFailed(OSStatus)
@@ -48,6 +48,19 @@ final class SystemAudioCapture: AudioLevelSource, @unchecked Sendable {
                 "오디오 입력 콜백을 등록할 수 없습니다. (코드 \(status))"
             case .startFailed(let status):
                 "시스템 오디오 캡처를 시작할 수 없습니다. (코드 \(status))"
+            }
+        }
+
+        /// 탭 생성 실패만 설정으로 보낸다.
+        ///
+        /// **권한이 없어도 탭 생성이 성공을 반환하는 경우가 있으므로**(실측) 이 실패가 곧
+        /// 권한 문제라는 보장은 없다. 그래도 오디오 캡처 창을 여는 것이 사용자가 취할 수 있는
+        /// 유일한 조치이고, 이 실패에서 압도적으로 흔한 원인이 권한 미허용이다.
+        var settingsPane: SystemSettingsPane? {
+            switch self {
+            case .tapCreationFailed: .audioCapturePrivacy
+            case .unsupportedOS, .noOutputDevice, .aggregateDeviceFailed,
+                 .formatUnavailable, .ioProcFailed, .startFailed: nil
             }
         }
     }
@@ -228,9 +241,6 @@ final class SystemAudioCapture: AudioLevelSource, @unchecked Sendable {
 
     // MARK: - Core Audio 헬퍼
 
-    /// 시스템 기본 출력 장치의 UID.
-    ///
-    /// 탭이 어느 장치로 나가는 소리를 잡을지 지정하려면 UID가 필요하다.
     /// 탭이 대상으로 삼는 출력 장치 셀렉터.
     ///
     /// **감시기와 같은 출처를 쓴다.** macOS의 기본 출력 셀렉터는 둘이고 서로 독립적으로
@@ -239,39 +249,15 @@ final class SystemAudioCapture: AudioLevelSource, @unchecked Sendable {
     /// 알 수 있으므로, 두 곳이 값을 각자 적는 대신 한 곳을 참조하게 둔다.
     static let outputDeviceSelector = AudioDeviceMonitor.selector(for: .output)
 
+    /// 시스템 기본 출력 장치의 UID. 탭이 어느 장치로 나가는 소리를 잡을지 지정하려면 필요하다.
+    ///
+    /// 조회 자체는 장치 목록 쪽에 있는 것을 쓴다 — 셀렉터를 여기서 따로 적으면 위 상수를
+    /// 둔 이유가 없어진다.
     private static func defaultOutputDeviceUID() throws -> String {
-        var address = AudioObjectPropertyAddress(
-            mSelector: outputDeviceSelector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioObjectID.zero
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &size,
-            &deviceID
-        )
-        guard status == noErr, deviceID != .zero else {
+        guard let uid = AudioDeviceCatalog.defaultDeviceUID(for: .output) else {
             throw CaptureError.noOutputDevice
         }
-
-        // CFString은 객체 참조라 &uid로 직접 넘기면 컴파일러가 경고한다.
-        // Unmanaged를 거쳐 소유권을 명시적으로 다룬다.
-        address.mSelector = kAudioDevicePropertyDeviceUID
-        var uidRef: Unmanaged<CFString>?
-        var uidSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let uidStatus = withUnsafeMutablePointer(to: &uidRef) { pointer in
-            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &uidSize, pointer)
-        }
-        guard uidStatus == noErr, let uidRef else {
-            throw CaptureError.noOutputDevice
-        }
-        // Get 계열 API가 +1 참조를 넘겨주므로 여기서 소유권을 받아 해제까지 맡는다.
-        return uidRef.takeRetainedValue() as String
+        return uid
     }
 
     /// 탭을 서브 디바이스로 품은 비공개 aggregate device를 만든다.

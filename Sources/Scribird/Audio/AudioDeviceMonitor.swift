@@ -200,18 +200,6 @@ final class AudioDeviceMonitor: @unchecked Sendable {
     static func currentDeviceName(for change: Change) -> String? {
         let deviceID = currentDeviceID(selector(for: change))
         guard deviceID != .zero else { return nil }
-
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioObjectPropertyName,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var nameRef: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let status = withUnsafeMutablePointer(to: &nameRef) { pointer in
-            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
-        }
-        guard status == noErr, let nameRef else { return nil }
-        return nameRef.takeRetainedValue() as String
+        return AudioDeviceCatalog.stringProperty(deviceID, kAudioObjectPropertyName)
     }
 }

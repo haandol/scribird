@@ -47,14 +47,13 @@ final class AudioLevelTracker: @unchecked Sendable {
     /// 레벨이 적정한지는 피크보다 이 값이 잘 말해준다. 실측 예에서 피크는
     /// -11.6 dBFS로 정상 범위였지만 평균은 -47.6 dBFS로 24dB 낮았다.
     /// 피크만 보면 이런 "전체적으로 작은" 녹음을 놓친다.
-    var averageActiveLevel: Float {
+    private var averageActiveLevel: Float {
         lock.withLock { activeCount > 0 ? activeSum / Float(activeCount) : 0 }
     }
 
     /// 발화 구간 평균의 dBFS.
     var averageDecibels: Float {
-        let average = averageActiveLevel
-        return average > 0 ? 20 * log10(average) : -Float.infinity
+        Self.dBFS(averageActiveLevel)
     }
 
     /// 평균 레벨을 판단할 만큼 표본이 모였는지.
@@ -84,13 +83,21 @@ final class AudioLevelTracker: @unchecked Sendable {
     static func normalize(_ amplitude: Float) -> Float {
         guard amplitude > 0 else { return 0 }
         let floorDB: Float = -60
-        let db = 20 * log10(amplitude)
+        let db = dBFS(amplitude)
         return max(0, min(1, (db - floorDB) / -floorDB))
     }
 
     /// 사람이 읽는 dBFS 값. 레벨이 적정한지 판단할 근거를 준다.
     var decibels: Float {
-        let level = recentLevel
-        return level > 0 ? 20 * log10(level) : -Float.infinity
+        Self.dBFS(recentLevel)
+    }
+
+    /// 선형 진폭을 dBFS로 옮긴다.
+    ///
+    /// 진폭 0은 `-infinity`다. 0을 `log10`에 넣으면 그 값이 나오지만 경계를 명시해 둔다 —
+    /// 표시·판정 양쪽이 이 값을 받아 "소리가 없음"으로 다루므로 어느 유한값으로 눌러 담으면
+    /// 무음이 아주 작은 소리로 보인다.
+    static func dBFS(_ amplitude: Float) -> Float {
+        amplitude > 0 ? 20 * log10(amplitude) : -.infinity
     }
 }

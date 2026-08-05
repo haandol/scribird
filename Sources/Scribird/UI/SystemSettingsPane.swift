@@ -31,8 +31,32 @@ enum SystemSettingsPane {
         }
     }
 
+    /// 이 창을 여는 버튼에 쓸 문구.
+    ///
+    /// 어느 창이 열릴지 버튼에 적어야 한다 — "설정 열기"만 있으면 사용자가 어디로 가는지 모르고,
+    /// 이 앱에서 열 수 있는 창이 넷이라 실제로 헷갈린다.
+    var openButtonTitle: String {
+        switch self {
+        case .microphonePrivacy: "마이크 설정 열기"
+        case .audioCapturePrivacy: "오디오 녹음 설정 열기"
+        case .privacyRoot: "개인정보 설정 열기"
+        case .soundInput: "사운드 설정 열기"
+        }
+    }
+
     func open() {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
     }
+}
+
+/// 사용자가 열어야 할 설정 창을 아는 오류.
+///
+/// **오류 문구를 되짚어 창을 고르지 않기 위한 것이다.** 예전에는 화면이 실패 메시지에서
+/// "권한"·"마이크"라는 낱말을 찾아 어느 창을 열지 정했는데, 그러면 문구를 다듬는 것만으로
+/// 버튼이 조용히 사라진다 — 그리고 그 버튼은 권한이 거부된 사용자가 녹취를 시작할 유일한
+/// 경로다. 어느 창인지는 실패를 만든 곳이 알고 있으므로 그곳이 함께 실어 보낸다.
+protocol SettingsPaneProviding {
+    /// 이 실패를 사용자가 고칠 수 있는 설정 창. 설정으로 고칠 수 없는 실패는 nil이다.
+    var settingsPane: SystemSettingsPane? { get }
 }

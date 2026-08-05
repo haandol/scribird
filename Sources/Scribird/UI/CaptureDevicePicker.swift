@@ -71,21 +71,18 @@ struct CaptureDevicePicker: View {
         if let uid = selectedUID {
             if devices.contains(where: { $0.uid == uid }) {
                 Text("이 장치에 고정됩니다. 시스템 기본이 바뀌어도 따라가지 않습니다.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .captionStyle(.secondary)
             } else {
                 // 저장된 선택이 지금 없는 장치를 가리킨다 — 뽑힌 헤드셋이 대표적이다.
                 Label(
                     "고른 장치가 연결돼 있지 않아 시스템 기본으로 기록합니다. 다시 연결하면 이 선택으로 돌아갑니다.",
                     systemImage: "exclamationmark.triangle.fill"
                 )
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
+                .captionStyle(.orange)
             }
         } else {
             Text("장치를 바꾸면 캡처가 따라갑니다.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .captionStyle(.secondary)
         }
     }
 }

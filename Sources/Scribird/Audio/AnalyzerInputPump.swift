@@ -14,6 +14,29 @@ protocol AudioLevelSource {
     var level: AudioLevelTracker { get }
 }
 
+/// 조정자가 캡처 경로에 요구하는 것 전부.
+///
+/// 마이크와 시스템 출력은 **여는 방식만** 다르다 — `AVAudioEngine` 탭이냐 Core Audio
+/// process tap이냐. 열고 닫고 다시 연결하고 스트림을 내주는 조작은 같은 모양이므로, 조정자가
+/// 소스를 구분해 분기하는 대신 이 프로토콜로 다룬다. 분기가 흩어져 있으면 한 소스에만 적용된
+/// 규칙이 생기고(예: 재연결은 하는데 정리는 빠뜨림) 그 어긋남은 장치를 실제로 바꿔 봐야
+/// 드러난다.
+///
+/// **소스별 독립은 이 프로토콜을 공유하는 것이 아니라 인스턴스를 따로 갖는 것으로 지킨다.**
+/// 한쪽이 실패해도 다른 쪽이 계속 흐르는 것은 조정자가 각 소스를 따로 열고 따로 접기 때문이다.
+protocol CaptureSource: AudioLevelSource {
+    /// 장치를 열고 캡처를 시작한다. 실패는 던진다 — 조용히 실패하면 무음 회의록이 남는다.
+    func start() throws
+    /// 캡처를 멈추고 입력 스트림을 닫는다. 이것으로 전사기가 마무리에 들어간다.
+    func stop()
+    /// 전사기에 물릴 입력 스트림. 재연결에도 이 스트림은 유지된다.
+    func makeInputStream() -> AsyncStream<AnalyzerInput>
+    /// 지금 대상 장치로 다시 연결한다. 시스템 기본이 바뀔 때 쓴다.
+    func reconnect() throws
+    /// 대상 장치를 바꿔 다시 연결한다. nil이면 시스템 기본으로 되돌린다.
+    func reconnect(toDeviceUID uid: String?) throws
+}
+
 /// 캡처 버퍼를 전사기 입력 스트림으로 흘려보내는 배관.
 ///
 /// 마이크와 시스템 출력은 **여는 방식만** 다르다 — `AVAudioEngine` 탭이냐 Core Audio

@@ -64,10 +64,7 @@ enum CaptureDeviceSelection {
         for resolution: Resolution,
         change: AudioDeviceMonitor.Change
     ) -> String? {
-        let label = switch change {
-        case .input: "마이크"
-        case .output: "시스템 오디오"
-        }
+        let label = change.captureLabel
         switch resolution {
         case .systemDefault, .pinned:
             return nil

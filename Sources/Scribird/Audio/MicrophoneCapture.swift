@@ -10,8 +10,8 @@ import Speech
 ///
 /// 캡처 이후의 처리(원본 저장·진폭 측정·리샘플링·시각 부여)는 `AnalyzerInputPump`가
 /// 맡는다. 이 타입에는 마이크를 여는 방법만 남는다.
-final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
-    enum CaptureError: LocalizedError {
+final class MicrophoneCapture: CaptureSource, @unchecked Sendable {
+    enum CaptureError: LocalizedError, SettingsPaneProviding {
         case noInputDevice
         case permissionDenied
         case engineFailed(any Error)
@@ -33,12 +33,27 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
                 "고른 마이크로 전환할 수 없습니다. (코드 \(status))"
             }
         }
+
+        /// 권한 거부만 설정으로 고칠 수 있다. 장치가 없거나 엔진이 실패한 것은 설정 창을
+        /// 열어도 할 수 있는 것이 없으므로 보내지 않는다.
+        var settingsPane: SystemSettingsPane? {
+            switch self {
+            case .permissionDenied: .microphonePrivacy
+            case .noInputDevice, .engineFailed, .deviceUnavailable, .deviceSelectionFailed: nil
+            }
+        }
     }
 
     private let engine = AVAudioEngine()
     private let pump: AnalyzerInputPump
 
+    private let lock = NSLock()
     /// 캡처할 장치의 UID. nil이면 시스템 기본 입력을 쓴다.
+    ///
+    /// 락으로 감싸는 이유는 이 타입이 `@unchecked Sendable`이기 때문이다. 지금은 조정자가
+    /// 메인 액터에서만 이 값을 바꾸므로 경합이 없지만, 그 사실은 이 타입 안에서 보이지 않는다 —
+    /// 시스템 오디오 쪽과 규칙이 갈라져 있으면 다음 사람이 어느 쪽을 표준으로 읽어야 할지
+    /// 알 수 없다.
     private var pinnedDeviceUID: String?
 
     init(
@@ -87,7 +102,7 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
         // 설정해야 한다. **포맷을 읽기 전에 설정해야 한다** — 장치를 바꾸면 채널 수가 함께
         // 바뀐다 (실측: 내장 마이크 1ch → USB 헤드셋 2ch). 먼저 읽으면 이전 장치의 포맷으로
         // 탭을 걸어 어긋난다.
-        if let uid = pinnedDeviceUID {
+        if let uid = lock.withLock({ pinnedDeviceUID }) {
             try Self.setInputDevice(uid: uid, on: input)
         }
 
@@ -128,7 +143,7 @@ final class MicrophoneCapture: AudioLevelSource, @unchecked Sendable {
 
     /// 캡처할 장치를 바꿔 다시 연결한다. 녹취 중에도 호출된다.
     func reconnect(toDeviceUID uid: String?) throws {
-        pinnedDeviceUID = uid
+        lock.withLock { pinnedDeviceUID = uid }
         try reconnect()
     }
 

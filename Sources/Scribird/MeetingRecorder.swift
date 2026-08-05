@@ -13,13 +13,39 @@ final class MeetingRecorder {
         case preparingModel(Double)
         case recording
         case stopping
-        case failed(String)
+        case failed(Failure)
 
         var isBusy: Bool {
             switch self {
             case .preparingModel, .recording, .stopping: true
             case .idle, .failed: false
             }
+        }
+    }
+
+    /// 사용자에게 알릴 실패 하나.
+    ///
+    /// 문구와 **그것을 고칠 설정 창**을 함께 들고 다닌다. 예전에는 화면이 문구에서 "권한"·
+    /// "마이크"라는 낱말을 찾아 어느 창을 열지 정했는데, 그러면 메시지를 다듬는 것만으로 그
+    /// 버튼이 조용히 사라진다 — 권한이 거부된 사용자에게는 그 버튼이 녹취를 시작할 유일한
+    /// 경로이므로, 사라진 것을 알아차릴 방법도 없이 기능을 잃는다.
+    struct Failure: Equatable {
+        let message: String
+        /// 사용자가 이 실패를 고칠 수 있는 설정 창. 설정으로 고칠 수 없으면 nil이다.
+        let settingsPane: SystemSettingsPane?
+
+        init(_ message: String, settingsPane: SystemSettingsPane? = nil) {
+            self.message = message
+            self.settingsPane = settingsPane
+        }
+
+        /// 오류에서 문구와 설정 창을 함께 뽑는다.
+        ///
+        /// 창을 아는 오류만 창을 싣는다 — 저장 실패처럼 설정과 무관한 오류에 창을 붙이면
+        /// 사용자를 아무것도 할 수 없는 화면으로 보낸다.
+        init(_ error: any Error) {
+            self.message = error.localizedDescription
+            self.settingsPane = (error as? any SettingsPaneProviding)?.settingsPane
         }
     }
 
@@ -150,21 +176,21 @@ final class MeetingRecorder {
         return InputLevel(meter: capture.level.meterValue, decibels: capture.level.decibels)
     }
 
-    /// 살아 있는 소스의 레벨 원천. 켜지지 않은 소스는 nil이다.
+    /// 살아 있는 소스의 캡처. 켜지지 않은 소스는 nil이다.
     ///
-    /// 두 캡처는 여는 방식만 다르고 레벨을 같은 형태로 노출하므로, 진단은 소스를
-    /// 구분하지 않고 이 표 하나를 거친다.
-    private func capture(for speaker: Speaker) -> (any AudioLevelSource)? {
+    /// 두 캡처는 여는 방식만 다르고 나머지 조작을 같은 모양으로 노출하므로, 진단·재연결·
+    /// 정리가 모두 소스를 구분하지 않고 이 표 하나를 거친다.
+    private func capture(for speaker: Speaker) -> (any CaptureSource)? {
         guard activeSources.contains(speaker) else { return nil }
-        return switch speaker {
-        case .me: microphone
-        case .remote: systemAudio
-        }
+        return captures[speaker]
     }
 
     private let timeline = TranscriptTimeline()
-    private var microphone: MicrophoneCapture?
-    private var systemAudio: SystemAudioCapture?
+    /// 소스별 캡처 경로.
+    ///
+    /// 소스별로 인스턴스를 따로 갖는 것이 두 경로가 독립이라는 불변식을 지키는 방식이다 —
+    /// 한 소스를 잃어도 다른 소스의 항목은 그대로 남아 계속 흐른다.
+    private var captures: [Speaker: any CaptureSource] = [:]
     private var sessions: [Speaker: TranscriptionSession] = [:]
     /// 화자별 언어 중재기. 단일 언어일 때는 만들지 않는다.
     private var arbiters: [Speaker: LanguageArbiter] = [:]
@@ -197,59 +223,10 @@ final class MeetingRecorder {
         sessionTimeOffset = 0
 
         do {
-            let locales = try await SpeechModelInstaller.resolveLocales(language.locales)
-
-            // 세션을 먼저 만든다. 필요한 에셋과 최적 오디오 포맷을 알아내려면
-            // 실제 모듈 인스턴스가 있어야 한다.
-            var sessions: [Speaker: TranscriptionSession] = [:]
-            for speaker in Speaker.allCases {
-                sessions[speaker] = TranscriptionSession(speaker: speaker, locales: locales)
-            }
-
-            let modules = await sessions[.me]!.modules
-
-            // 예약을 먼저 해야 다운로드한 모델이 정리되지 않는다.
-            //
-            // 실제로 잡힌 것만 해제 대상으로 남긴다 — 예약하지 않은 로케일을 해제하면
-            // false가 돌아올 뿐이지만(실측), 잡힌 로케일이 목록에서 빠지면 그대로 붙잡힌
-            // 채 남아 다음 실행의 한도를 잠식한다.
-            let reservation = await SpeechModelInstaller.reserve(locales: locales)
-            reservedLocales = reservation.reserved
-
-            // 예약 실패로는 녹취를 막지 않는다. 실측에서 예약 0개 상태로도 최적 오디오 포맷
-            // 질의와 분석기 준비가 성공했으므로, 모델이 이미 설치돼 있으면 진행할 수 있다.
-            // 접는 것은 다운로드를 붙잡을 수단이 없는 미설치 경우뿐이다.
-            if !reservation.isComplete {
-                let installed = await SpeechModelInstaller.isInstalled(modules: modules)
-                guard installed else {
-                    let failed = reservation.unreserved[0]
-                    throw SpeechModelInstaller.InstallError.reservationFailed(
-                        locale: failed.locale,
-                        reason: failed.reason,
-                        requested: locales,
-                        reserved: await SpeechModelInstaller.reservedLocales()
-                    )
-                }
-                // 설치된 모델로 진행하되 회수 위험을 알린다. 조용히 넘어가면 회수 위험이
-                // 있는 세션과 없는 세션을 사용자가 구분할 수 없다.
-                modelRetentionWarning = Self.retentionWarning(for: reservation.unreserved)
-            }
-
-            try await SpeechModelInstaller.ensureModels(for: modules) { [weak self] fraction in
-                Task { @MainActor [weak self] in
-                    guard let self, case .preparingModel = self.state else { return }
-                    self.state = .preparingModel(fraction)
-                }
-            }
-
-            // 모델이 하나라도 미설치면 여기서 nil이 나온다. 설치 이후에 물어야 한다.
-            guard let audioFormat = await TranscriptionSession.bestAudioFormat(for: modules) else {
-                throw RecorderError.noCompatibleAudioFormat
-            }
-
-            for session in sessions.values {
-                try await session.prepare(format: audioFormat)
-            }
+            let provisioned = try await provisionSessions()
+            let audioFormat = provisioned.audioFormat
+            // 켜지지 못한 소스의 세션을 아래에서 덜어내므로 변경 가능해야 한다.
+            var sessions = provisioned.sessions
 
             let startedAt = Date()
             let store = try TranscriptStore(startedAt: startedAt)
@@ -267,54 +244,11 @@ final class MeetingRecorder {
                 }
             }
 
-            // 두 소스를 서로 독립적으로 켠다. 한쪽이 실패해도 다른 쪽은 살린다.
-            // 마이크만 있어도 혼자 말하는 회의는 전사돼야 하고, 오디오 캡처 권한이
-            // 없어도 마이크 전사는 계속돼야 한다.
-            var failures: [String] = []
-
-            // 캡처할 장치를 소스별로 결정한다. 고정된 장치가 없으면 시스템 기본을 따라간다.
-            let inputSelection = CaptureDeviceSelection.resolve(for: .input)
-            let outputSelection = CaptureDeviceSelection.resolve(for: .output)
-            deviceSelections = [.me: inputSelection, .remote: outputSelection]
-
-            // ── 마이크 (AVAudioEngine, 마이크 권한만 필요) ──
-            if await MicrophoneCapture.requestPermission() {
-                let microphone = MicrophoneCapture(
-                    targetFormat: audioFormat,
-                    audioRecorder: audioRecorder,
-                    deviceUID: inputSelection.deviceUID
-                )
-                do {
-                    try microphone.start()
-                    // 캡처가 실제로 떴을 때만 전사 세션을 물린다. 실패한 소스에
-                    // 세션을 붙이면 끝나지 않는 스트림을 기다리는 태스크가 남아
-                    // stop()이 영구 대기에 빠진다.
-                    await attach(session: sessions[.me]!, to: microphone.makeInputStream())
-                    self.microphone = microphone
-                    activeSources.insert(.me)
-                } catch {
-                    microphone.stop()
-                    failures.append(error.localizedDescription)
-                }
-            } else {
-                failures.append(MicrophoneCapture.CaptureError.permissionDenied.localizedDescription)
-            }
-
-            // ── 시스템 출력 (Core Audio Process Tap, 오디오 캡처 권한만 필요) ──
-            let systemAudio = SystemAudioCapture(
-                targetFormat: audioFormat,
-                audioRecorder: audioRecorder,
-                deviceUID: outputSelection.deviceUID
+            let failures = await startCaptures(
+                sessions: sessions,
+                audioFormat: audioFormat,
+                audioRecorder: audioRecorder
             )
-            do {
-                try systemAudio.start()
-                await attach(session: sessions[.remote]!, to: systemAudio.makeInputStream())
-                self.systemAudio = systemAudio
-                activeSources.insert(.remote)
-            } catch {
-                systemAudio.stop()
-                failures.append(error.localizedDescription)
-            }
 
             // 켜지지 않은 소스의 전사 세션은 즉시 정리한다. 남겨두면 마무리 단계에서
             // 끝나지 않는 analyzer를 기다리게 된다.
@@ -328,25 +262,10 @@ final class MeetingRecorder {
             // 둘 다 실패했을 때만 세션을 접는다.
             guard !activeSources.isEmpty else {
                 await teardown()
-                state = .failed(failures.joined(separator: "\n\n"))
+                state = .failed(Self.combined(failures))
                 return
             }
-            // 하나만 켜졌으면 녹취는 진행하되 무엇이 빠졌는지 알린다.
-            // 고른 장치가 사라져 기본으로 되돌린 것도 여기서 함께 알린다 — 사용자가 고른
-            // 장치가 아니라는 사실을 알아야 한다.
-            let selectionWarnings = Speaker.allCases.compactMap { speaker -> String? in
-                guard activeSources.contains(speaker),
-                      let selection = deviceSelections[speaker]
-                else { return nil }
-                return CaptureDeviceSelection.warning(
-                    for: selection,
-                    change: speaker == .me ? .input : .output
-                )
-            }
-            let allWarnings = failures + selectionWarnings
-            if !allWarnings.isEmpty {
-                sourceWarning = allWarnings.joined(separator: " / ")
-            }
+            sourceWarning = startupWarning(failures: failures)
 
             self.sessions = sessions
             self.store = store
@@ -362,7 +281,189 @@ final class MeetingRecorder {
             startDeviceMonitoring()
         } catch {
             await teardown()
-            state = .failed(error.localizedDescription)
+            state = .failed(Failure(error))
+        }
+    }
+
+    /// 두 소스가 모두 실패했을 때 하나의 실패로 합친다.
+    ///
+    /// 설정 창은 **하나만** 실을 수 있으므로 첫 번째로 창을 아는 실패의 것을 쓴다. 마이크가
+    /// 먼저 오는 것은 우연이 아니다 — 두 권한이 모두 거부된 상태에서 사용자가 먼저 확인해야
+    /// 하는 것이 마이크다. 마이크만으로도 혼자 말하는 회의는 전사되므로, 그 하나를 허용하는
+    /// 것으로 앱이 곧 쓸 수 있게 된다.
+    static func combined(_ failures: [Failure]) -> Failure {
+        Failure(
+            failures.map(\.message).joined(separator: "\n\n"),
+            settingsPane: failures.compactMap(\.settingsPane).first
+        )
+    }
+
+    /// 언어 모델을 확보하고 소스별 전사 세션을 준비한다.
+    ///
+    /// **순서가 규칙이다.** 예약 → 설치 → 오디오 포맷 질의 → 분석기 준비. 모델이 하나라도
+    /// 미설치면 최적 포맷 질의가 nil을 돌려주므로 설치보다 먼저 물으면 캡처를 열 포맷을 정할
+    /// 수 없다. 예약을 설치보다 먼저 하는 것은 내려받은 모델이 곧 정리되지 않게 붙잡기
+    /// 위해서다.
+    ///
+    /// - Returns: 소스별 전사 세션과, 두 세션이 공통으로 받아들일 캡처 포맷.
+    private func provisionSessions() async throws -> (
+        sessions: [Speaker: TranscriptionSession],
+        audioFormat: AVAudioFormat
+    ) {
+        let locales = try await SpeechModelInstaller.resolveLocales(language.locales)
+
+        // 세션을 먼저 만든다. 필요한 에셋과 최적 오디오 포맷을 알아내려면
+        // 실제 모듈 인스턴스가 있어야 한다.
+        var sessions: [Speaker: TranscriptionSession] = [:]
+        for speaker in Speaker.allCases {
+            sessions[speaker] = TranscriptionSession(speaker: speaker, locales: locales)
+        }
+
+        let modules = await sessions[.me]!.modules
+        try await reserveModels(locales: locales, modules: modules)
+
+        try await SpeechModelInstaller.ensureModels(for: modules) { [weak self] fraction in
+            Task { @MainActor [weak self] in
+                guard let self, case .preparingModel = self.state else { return }
+                self.state = .preparingModel(fraction)
+            }
+        }
+
+        // 모델이 하나라도 미설치면 여기서 nil이 나온다. 설치 이후에 물어야 한다.
+        guard let audioFormat = await TranscriptionSession.bestAudioFormat(for: modules) else {
+            throw RecorderError.noCompatibleAudioFormat
+        }
+
+        for session in sessions.values {
+            try await session.prepare(format: audioFormat)
+        }
+        return (sessions, audioFormat)
+    }
+
+    /// 언어 모델을 붙잡아 둔다. 실패해도 모델이 설치돼 있으면 경고로 강등한다.
+    ///
+    /// 예약을 먼저 해야 다운로드한 모델이 정리되지 않는다. 실제로 잡힌 것만 해제 대상으로
+    /// 남긴다 — 예약하지 않은 로케일을 해제하면 false가 돌아올 뿐이지만(실측), 잡힌 로케일이
+    /// 목록에서 빠지면 그대로 붙잡힌 채 남아 다음 실행의 한도를 잠식한다.
+    private func reserveModels(locales: [Locale], modules: [any SpeechModule]) async throws {
+        let reservation = await SpeechModelInstaller.reserve(locales: locales)
+        reservedLocales = reservation.reserved
+        guard !reservation.isComplete else { return }
+
+        // 예약 실패로는 녹취를 막지 않는다. 실측에서 예약 0개 상태로도 최적 오디오 포맷
+        // 질의와 분석기 준비가 성공했으므로, 모델이 이미 설치돼 있으면 진행할 수 있다.
+        // 접는 것은 다운로드를 붙잡을 수단이 없는 미설치 경우뿐이다.
+        guard await SpeechModelInstaller.isInstalled(modules: modules) else {
+            let failed = reservation.unreserved[0]
+            throw SpeechModelInstaller.InstallError.reservationFailed(
+                locale: failed.locale,
+                reason: failed.reason,
+                requested: locales,
+                reserved: await SpeechModelInstaller.reservedLocales()
+            )
+        }
+        // 설치된 모델로 진행하되 회수 위험을 알린다. 조용히 넘어가면 회수 위험이
+        // 있는 세션과 없는 세션을 사용자가 구분할 수 없다.
+        modelRetentionWarning = Self.retentionWarning(for: reservation.unreserved)
+    }
+
+    /// 두 소스를 서로 독립적으로 켠다.
+    ///
+    /// **한쪽이 실패해도 다른 쪽은 살린다.** 마이크만 있어도 혼자 말하는 회의는 전사돼야 하고,
+    /// 오디오 캡처 권한이 없어도 마이크 전사는 계속돼야 한다. 세션을 접을지는 호출자가
+    /// `activeSources`를 보고 판단한다 — 둘 다 실패했을 때만이다.
+    ///
+    /// - Returns: 켜지지 못한 소스들의 실패 사유.
+    private func startCaptures(
+        sessions: [Speaker: TranscriptionSession],
+        audioFormat: AVAudioFormat,
+        audioRecorder: AudioRecorder?
+    ) async -> [Failure] {
+        // 캡처할 장치를 소스별로 결정한다. 고정된 장치가 없으면 시스템 기본을 따라간다.
+        deviceSelections = Dictionary(
+            uniqueKeysWithValues: Speaker.allCases.map {
+                ($0, CaptureDeviceSelection.resolve(for: $0.deviceChange))
+            }
+        )
+
+        var failures: [Failure] = []
+        for speaker in Speaker.allCases {
+            do {
+                let capture = try await makeCapture(
+                    for: speaker,
+                    targetFormat: audioFormat,
+                    audioRecorder: audioRecorder,
+                    deviceUID: deviceSelections[speaker]?.deviceUID
+                )
+                do {
+                    try capture.start()
+                    // 캡처가 실제로 떴을 때만 전사 세션을 물린다. 실패한 소스에
+                    // 세션을 붙이면 끝나지 않는 스트림을 기다리는 태스크가 남아
+                    // stop()이 영구 대기에 빠진다.
+                    await attach(session: sessions[speaker]!, to: capture.makeInputStream())
+                    captures[speaker] = capture
+                    activeSources.insert(speaker)
+                } catch {
+                    capture.stop()
+                    throw error
+                }
+            } catch {
+                failures.append(Failure(error))
+            }
+        }
+        return failures
+    }
+
+    /// 시작 시점에 사용자에게 알릴 것들을 한 문장으로 모은다.
+    ///
+    /// 하나만 켜졌으면 녹취는 진행하되 무엇이 빠졌는지 알린다. 고른 장치가 사라져 기본으로
+    /// 되돌린 것도 여기서 함께 알린다 — 사용자가 고른 장치가 아니라는 사실을 알아야 한다.
+    private func startupWarning(failures: [Failure]) -> String? {
+        let selectionWarnings = Speaker.allCases.compactMap { speaker -> String? in
+            guard activeSources.contains(speaker),
+                  let selection = deviceSelections[speaker]
+            else { return nil }
+            return CaptureDeviceSelection.warning(
+                for: selection,
+                change: speaker.deviceChange
+            )
+        }
+        let all = failures.map(\.message) + selectionWarnings
+        return all.isEmpty ? nil : all.joined(separator: " / ")
+    }
+
+    /// 소스에 맞는 캡처 경로를 만든다. 아직 열지는 않는다.
+    ///
+    /// 여기가 두 경로의 **유일한** 차이다 — 마이크는 `AVAudioEngine`이고 마이크 권한을 먼저
+    /// 받아야 하며, 시스템 출력은 Core Audio process tap이고 오디오 캡처 권한만 쓴다. 그
+    /// 차이를 이 함수 하나에 모아 두면 시작·재연결·정리는 소스를 구분하지 않는다.
+    ///
+    /// 권한 거부를 던져서 알린다. 조용히 nil을 돌려주면 실패 사유가 사라져 사용자에게
+    /// 무엇을 허용해야 하는지 알릴 수 없다.
+    private func makeCapture(
+        for speaker: Speaker,
+        targetFormat: AVAudioFormat,
+        audioRecorder: AudioRecorder?,
+        deviceUID: String?
+    ) async throws -> any CaptureSource {
+        switch speaker {
+        case .me:
+            guard await MicrophoneCapture.requestPermission() else {
+                throw MicrophoneCapture.CaptureError.permissionDenied
+            }
+            return MicrophoneCapture(
+                targetFormat: targetFormat,
+                audioRecorder: audioRecorder,
+                deviceUID: deviceUID
+            )
+        case .remote:
+            // 탭은 권한을 미리 물을 수 없다. 권한이 없어도 생성이 성공을 반환하므로
+            // (실측) 판정은 시작 이후의 진폭이 맡는다.
+            return SystemAudioCapture(
+                targetFormat: targetFormat,
+                audioRecorder: audioRecorder,
+                deviceUID: deviceUID
+            )
         }
     }
 
@@ -411,8 +512,7 @@ final class MeetingRecorder {
         deviceMonitor = nil
 
         // 캡처를 먼저 끊어야 입력 스트림이 끝나고 분석기가 마무리에 들어간다.
-        microphone?.stop()
-        systemAudio?.stop()
+        for capture in captures.values { capture.stop() }
 
         // 마무리를 무한정 기다리지 않는다. 전사기 하나가 응답하지 않아도
         // 회의록과 오디오 파일은 반드시 저장돼야 한다.
@@ -427,17 +527,7 @@ final class MeetingRecorder {
         // 남은 태스크는 강제로 취소한다.
         for task in runTasks { task.cancel() }
 
-        // 중재 대기 중인 후보를 먼저 확정해야 타임라인이 완전해진다. 이 안에서 저장까지
-        // 끝나므로 기다린다 — 기다리지 않으면 이 발화들이 읽기용 회의록 생성 이후에 도착해
-        // 두 산출물에서 함께 빠진다.
-        for arbiter in arbiters.values {
-            await arbiter.flush()
-        }
-
-        // 확정되지 못한 마지막 발화도 저장한다.
-        for segment in timeline.flushPending() {
-            await store?.append(segment)
-        }
+        await drainPendingUtterances(into: store)
         segments = timeline.displaySegments
 
         let storageError = audioRecorder?.storageError
@@ -455,9 +545,33 @@ final class MeetingRecorder {
         // 전사는 성공했지만 원본 저장이 실패한 경우. 회의록은 이미 남았으니
         // 실패로 뭉개지 말고 저장 실패만 알린다.
         if let storageError {
-            state = .failed("회의록은 저장했지만 음성 원본 저장에 실패했습니다: \(storageError.localizedDescription)")
+            // 설정 창을 싣지 않는다 — 디스크 쓰기 실패는 권한 설정으로 고칠 수 없으므로
+            // 보내면 아무것도 할 수 없는 화면을 열게 된다.
+            state = .failed(
+                Failure("회의록은 저장했지만 음성 원본 저장에 실패했습니다: \(storageError.localizedDescription)")
+            )
         } else {
             state = .idle
+        }
+    }
+
+    /// 아직 확정되지 않은 발화를 모두 주어진 스토어에 못박는다.
+    ///
+    /// 종료와 세션 경계가 같은 순서를 쓴다 — **중재기 flush를 먼저 기다리고**, 그다음 미확정
+    /// 발화를 남긴다. 순서와 대기가 이 순간의 규칙 전부다:
+    ///
+    /// - 중재기 안에서 저장까지 끝나므로 기다린다. 기다리지 않으면 그 발화들이 읽기용 회의록
+    ///   생성 이후에 도착해 두 산출물에서 함께 빠진다.
+    /// - 확정되지 못한 발화도 남긴다 — 불완전한 발화가 누락보다 낫다.
+    ///
+    /// 두 경로가 이 순서를 각자 적고 있으면 한쪽만 고쳐질 수 있고, 그 증상(화면에는 있는데
+    /// 파일에는 없음)은 사용자가 회의 후에야 발견한다.
+    private func drainPendingUtterances(into store: TranscriptStore?) async {
+        for arbiter in arbiters.values {
+            await arbiter.flush()
+        }
+        for segment in timeline.flushPending() {
+            await store?.append(segment)
         }
     }
 
@@ -495,10 +609,7 @@ final class MeetingRecorder {
         // 중지·회전 중에 도착한 알림은 무시한다. 그 경로가 캡처를 이미 다루고 있다.
         guard state == .recording else { return }
 
-        let speaker: Speaker = switch change {
-        case .output: .remote
-        case .input: .me
-        }
+        let speaker = change.speaker
         // 시작하지 못한 소스는 따라갈 캡처가 없다. 장치가 생겨서 이제 열 수 있게 됐더라도
         // 여기서 새로 켜지 않는다 — 전사 세션이 이미 폐기됐으므로 물릴 곳이 없다.
         guard activeSources.contains(speaker) else { return }
@@ -509,16 +620,33 @@ final class MeetingRecorder {
         let selection = deviceSelections[speaker] ?? .systemDefault
         guard selection.followsSystemDefault else { return }
 
+        // 어느 장치로 옮겼는지 알려야 전환 구간의 공백을 회의 내용으로 오해하지 않는다.
         let deviceName = AudioDeviceMonitor.currentDeviceName(for: change)
+        let label = speaker.captureLabel
+        await reconnect(
+            speaker,
+            notice: deviceName.map { "\(label)를 «\($0)»로 옮겼습니다." }
+                ?? "\(label) 장치가 바뀌어 다시 연결했습니다.",
+            using: { try $0.reconnect() }
+        )
+    }
+
+    /// 한 소스의 캡처를 다시 연결하고 결과를 알린다.
+    ///
+    /// 기본 장치를 따라가는 경로와 사용자가 장치를 고르는 경로가 이것을 공유한다. 둘의 차이는
+    /// 어느 장치를 대상으로 삼는지와 알림 문구뿐이고, **재연결 실패를 어떻게 다루는지는 같아야
+    /// 한다** — 한 소스의 실패가 다른 소스를 멈추지 않고 둘 다 잃었을 때만 세션을 접는 규칙이
+    /// 두 경로에 따로 적혀 있으면 한쪽만 고쳐질 수 있다.
+    private func reconnect(
+        _ speaker: Speaker,
+        notice: String,
+        using reconnecting: (any CaptureSource) throws -> Void
+    ) async {
+        guard let capture = captures[speaker] else { return }
         do {
-            switch change {
-            case .output: try systemAudio?.reconnect()
-            case .input: try microphone?.reconnect()
-            }
-            // 어느 장치로 옮겼는지 알려야 전환 구간의 공백을 회의 내용으로 오해하지 않는다.
-            let label = speaker == .me ? "마이크" : "시스템 오디오"
-            sourceWarning = deviceName.map { "\(label)를 «\($0)»로 옮겼습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다." }
-                ?? "\(label) 장치가 바뀌어 다시 연결했습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다."
+            try reconnecting(capture)
+            // 전환 구간의 손실은 복구할 수 없으므로 숨기지 않고 함께 알린다.
+            sourceWarning = notice + " 전환 중 잠깐의 소리는 기록되지 않았습니다."
         } catch {
             // 한 소스의 재연결 실패가 다른 소스를 멈추지 않는다 — 시작 시점의 실패 격리와
             // 같은 규칙이다. 둘 다 잃었을 때만 세션을 접는다.
@@ -534,30 +662,23 @@ final class MeetingRecorder {
     func selectCaptureDevice(_ uid: String?, for change: AudioDeviceMonitor.Change) async {
         RecordingPreferences.save(pinnedDeviceUID: uid, for: change)
 
-        let speaker: Speaker = switch change {
-        case .input: .me
-        case .output: .remote
-        }
+        let speaker = change.speaker
         let selection = CaptureDeviceSelection.resolve(for: change)
         deviceSelections[speaker] = selection
 
         // 녹취 중이 아니면 다음 시작이 이 선택을 읽는다.
         guard state == .recording, activeSources.contains(speaker) else { return }
 
-        do {
-            switch change {
-            case .input: try microphone?.reconnect(toDeviceUID: selection.deviceUID)
-            case .output: try systemAudio?.reconnect(toDeviceUID: selection.deviceUID)
-            }
-            let label = speaker == .me ? "마이크" : "시스템 오디오"
-            let target = selection.deviceUID.flatMap { AudioDeviceCatalog.name(forUID: $0) }
-                ?? AudioDeviceMonitor.currentDeviceName(for: change)
-            sourceWarning = target.map {
-                "\(label)를 «\($0)»로 바꿨습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다."
-            } ?? "\(label) 장치를 바꿨습니다. 전환 중 잠깐의 소리는 기록되지 않았습니다."
-        } catch {
-            await loseSource(speaker, reason: error.localizedDescription)
-        }
+        let label = speaker.captureLabel
+        // 고정한 장치의 이름을 먼저 찾고, 따라가기로 되돌린 경우엔 지금의 시스템 기본을 적는다.
+        let target = selection.deviceUID.flatMap { AudioDeviceCatalog.name(forUID: $0) }
+            ?? AudioDeviceMonitor.currentDeviceName(for: change)
+        await reconnect(
+            speaker,
+            notice: target.map { "\(label)를 «\($0)»로 바꿨습니다." }
+                ?? "\(label) 장치를 바꿨습니다.",
+            using: { try $0.reconnect(toDeviceUID: selection.deviceUID) }
+        )
     }
 
     /// 사용자에게 보여줄 장치 목록. 설정 화면이 읽는다.
@@ -572,24 +693,21 @@ final class MeetingRecorder {
 
     /// 재연결에 실패한 소스를 세션에서 뺀다. 남은 소스가 없으면 세션을 접는다.
     private func loseSource(_ speaker: Speaker, reason: String) async {
-        switch speaker {
-        case .me:
-            microphone?.stop()
-            microphone = nil
-        case .remote:
-            systemAudio?.stop()
-            systemAudio = nil
-        }
+        // 이 소스만 접는다. 다른 소스의 항목은 표에 그대로 남아 계속 흐른다.
+        captures.removeValue(forKey: speaker)?.stop()
         activeSources.remove(speaker)
 
-        let label = speaker == .me ? "마이크" : "시스템 오디오"
+        let label = speaker.captureLabel
         guard activeSources.isEmpty else {
             sourceWarning = "\(label)를 새 장치로 다시 연결하지 못해 이 소스의 기록이 멈췄습니다: \(reason)"
             return
         }
         // 남은 소스가 없으면 더 기록할 것이 없다. 확보한 회의록은 저장하고 끝낸다.
         await stop()
-        state = .failed("\(label)를 새 장치로 다시 연결하지 못해 녹취를 마쳤습니다: \(reason)")
+        // 장치 재연결 실패는 권한이 아니라 장치 쪽 문제이므로 설정 창을 싣지 않는다.
+        state = .failed(
+            Failure("\(label)를 새 장치로 다시 연결하지 못해 녹취를 마쳤습니다: \(reason)")
+        )
     }
 
     // MARK: - 세션 경계
@@ -624,16 +742,10 @@ final class MeetingRecorder {
         let previousStore = store
         let previousStart = startedAt
 
-        // 중재 대기 중인 후보를 확정해야 이전 세션의 시간축이 완전해진다. 종료와 같은
-        // 이유로 기다린다 — 경계에서도 이전 세션의 회의록이 곧 생성되므로, 기다리지 않으면
-        // 이 발화들이 그 이후에 도착해 이전 회의의 두 산출물에서 함께 빠진다.
-        for arbiter in arbiters.values {
-            await arbiter.flush()
-        }
-        // 확정되지 못한 발화도 이전 세션에 남긴다 — 불완전한 발화가 누락보다 낫다.
-        for segment in timeline.flushPending() {
-            await previousStore?.append(segment)
-        }
+        // 이전 세션의 시간축을 완전하게 닫는다. 종료와 같은 순서를 쓴다 — 경계에서도 이전
+        // 세션의 회의록이 곧 생성되므로, 기다리지 않으면 이 발화들이 그 이후에 도착해 이전
+        // 회의의 두 산출물에서 함께 빠진다.
+        await drainPendingUtterances(into: previousStore)
 
         do {
             let store = try TranscriptStore(startedAt: boundary)
@@ -743,8 +855,7 @@ final class MeetingRecorder {
         sessions.removeAll()
         for arbiter in arbiters.values { arbiter.reset() }
         arbiters.removeAll()
-        microphone = nil
-        systemAudio = nil
+        captures.removeAll()
         store = nil
         audioRecorder = nil
         startedAt = nil

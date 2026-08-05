@@ -34,8 +34,7 @@ struct TranscriptView: View {
                 Text(statusTitle)
                     .font(.system(size: 13, weight: .semibold))
                 statusDetail
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .captionStyle(.secondary)
                     .monospacedDigit()
             }
 
@@ -161,7 +160,7 @@ struct TranscriptView: View {
                         "마이크에서 소리가 들어오지 않습니다. 권한이 거부됐거나 입력 장치가 음소거일 수 있습니다.",
                         systemImage: "mic.slash.fill",
                         tint: .orange,
-                        action: ("마이크 설정 열기", .microphonePrivacy)
+                        pane: .microphonePrivacy
                     )
                 } else if recorder.microphoneIsTooQuiet {
                     // 전사는 되지만 저장된 음성이 너무 작아 나중에 듣기 어려운 상태.
@@ -169,7 +168,7 @@ struct TranscriptView: View {
                         "녹음 레벨이 낮습니다. 마이크에 더 가까이 말하거나 시스템 설정 > 사운드에서 입력 볼륨을 올려 주세요.",
                         systemImage: "waveform.badge.exclamationmark",
                         tint: .orange,
-                        action: ("사운드 설정 열기", .soundInput)
+                        pane: .soundInput
                     )
                 }
 
@@ -180,7 +179,7 @@ struct TranscriptView: View {
                         "시스템 오디오가 무음입니다. 재생 중인 소리가 없거나, 시스템 설정 > 개인정보 보호 및 보안 > 오디오 녹음에서 Scribird가 허용되지 않았을 수 있습니다.",
                         systemImage: "speaker.slash.fill",
                         tint: .orange,
-                        action: ("오디오 녹음 설정 열기", .audioCapturePrivacy)
+                        pane: .audioCapturePrivacy
                     )
                 }
 
@@ -189,7 +188,7 @@ struct TranscriptView: View {
                         warning,
                         systemImage: "exclamationmark.triangle.fill",
                         tint: .orange,
-                        action: ("개인정보 설정 열기", .privacyRoot)
+                        pane: .privacyRoot
                     )
                 }
 
@@ -201,7 +200,7 @@ struct TranscriptView: View {
                         warning,
                         systemImage: "arrow.down.circle.badge.exclamationmark",
                         tint: .orange,
-                        action: nil
+                        pane: nil
                     )
                 }
             }
@@ -253,7 +252,7 @@ struct TranscriptView: View {
         _ message: String,
         systemImage: String,
         tint: Color,
-        action: (label: String, pane: SystemSettingsPane)?
+        pane: SystemSettingsPane?
     ) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: systemImage)
@@ -263,8 +262,8 @@ struct TranscriptView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if let action {
-                Button(action.label) { action.pane.open() }
+            if let pane {
+                Button(pane.openButtonTitle) { pane.open() }
                     .buttonStyle(.link)
                     .font(.system(size: 10))
             }
@@ -275,8 +274,8 @@ struct TranscriptView: View {
 
     @ViewBuilder
     private var content: some View {
-        if case .failed(let message) = recorder.state {
-            errorPane(message)
+        if case .failed(let failure) = recorder.state {
+            errorPane(failure)
         } else if recorder.segments.isEmpty {
             emptyPane
         } else {
@@ -319,36 +318,31 @@ struct TranscriptView: View {
             Text(recorder.language == .auto
                 ? "마이크는 «나», 스피커 소리는 «상대방»으로 자동 구분됩니다.\n한국어와 영어를 함께 인식하며, 혼자 말해도 기록됩니다."
                 : "마이크는 «나», 스피커 소리는 «상대방»으로 자동 구분됩니다.\n회의 앱 없이 혼자 말해도 기록됩니다.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .captionStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func errorPane(_ message: String) -> some View {
+    private func errorPane(_ failure: MeetingRecorder.Failure) -> some View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 30))
                 .foregroundStyle(.orange)
-            Text(message)
+            Text(failure.message)
                 .font(.system(size: 12))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
             HStack(spacing: 8) {
-                // 권한 문제일 때만 설정으로 보낸다. 저장 실패 같은 경우엔 무의미하다.
+                // 설정으로 고칠 수 있는 실패만 설정으로 보낸다. 저장 실패 같은 경우엔 무의미하다.
                 //
-                // 이 앱은 화면 녹화 권한을 쓰지 않는다. 실패할 수 있는 권한은
-                // 마이크와 오디오 녹음뿐이므로, 메시지에 따라 알맞은 창을 연다.
-                if message.contains("권한") {
-                    let isMicrophone = message.contains("마이크")
-                    Button(isMicrophone ? "마이크 설정 열기" : "오디오 녹음 설정 열기") {
-                        let pane: SystemSettingsPane = isMicrophone
-                            ? .microphonePrivacy
-                            : .audioCapturePrivacy
-                        pane.open()
-                    }
+                // **어느 창인지는 실패를 만든 곳이 알려준다.** 예전에는 여기서 메시지에
+                // "권한"·"마이크"라는 낱말이 있는지 찾아 정했는데, 그러면 문구를 다듬는 것만으로
+                // 이 버튼이 조용히 사라진다 — 권한이 거부된 사용자에게는 이것이 녹취를 시작할
+                // 유일한 경로다.
+                if let pane = failure.settingsPane {
+                    Button(pane.openButtonTitle) { pane.open() }
                 }
                 if let directory = recorder.lastSessionDirectory {
                     Button("저장 폴더 열기") { _ = recorder.folderOpener.open(directory) }
@@ -383,7 +377,7 @@ struct TranscriptView: View {
                     error,
                     systemImage: "keyboard.badge.exclamationmark",
                     tint: .orange,
-                    action: nil
+                    pane: nil
                 )
             }
 
@@ -436,7 +430,7 @@ struct TranscriptView: View {
                 .buttonStyle(.link)
             }
         }
-        .font(.system(size: 11))
+        .captionSize()
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
     }

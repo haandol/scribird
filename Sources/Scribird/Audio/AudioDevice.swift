@@ -84,6 +84,9 @@ enum AudioDeviceCatalog {
     }
 
     /// 시스템 기본 장치의 UID. 따라가기 모드에서 쓴다.
+    ///
+    /// 셀렉터를 감시기에서 가져온다 — 탭이 대상으로 삼는 셀렉터와 어긋나면 알림이 오지
+    /// 않으므로, 이 앱에서 기본 장치를 읽는 곳은 모두 그 한 출처를 거친다.
     static func defaultDeviceUID(for change: AudioDeviceMonitor.Change) -> String? {
         let deviceID = AudioDeviceMonitor.currentDeviceID(
             AudioDeviceMonitor.selector(for: change)
@@ -148,7 +151,12 @@ enum AudioDeviceCatalog {
         return list.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 
-    private static func stringProperty(
+    /// 장치의 문자열 프로퍼티 하나를 읽는다.
+    ///
+    /// `Unmanaged<CFString>`을 거쳐야 하는 이유: CFString은 객체 참조라 `&value`로 직접
+    /// 넘기면 컴파일러가 경고한다. Get 계열 API가 +1 참조를 넘겨주므로 여기서 소유권을
+    /// 받아 해제까지 맡는다. 이 배관이 세 곳에 흩어져 있던 것을 여기 한 번만 둔다.
+    static func stringProperty(
         _ deviceID: AudioObjectID,
         _ selector: AudioObjectPropertySelector
     ) -> String? {

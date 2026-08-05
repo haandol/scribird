@@ -32,8 +32,7 @@ struct SettingsView: View {
                 // 잠긴 이유를 적지 않으면 사용자는 앱이 고장 났다고 판단한다.
                 if recorder.state.isBusy {
                     Text("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 전사기와 파일에 반영되지 않기 때문입니다.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .captionStyle(.secondary)
                 }
             }
 
@@ -53,8 +52,7 @@ struct SettingsView: View {
 
                 if recorder.state.isBusy {
                     Text("녹취 중에 바꾸면 그 소스만 새 장치로 다시 연결됩니다. 회의록은 끊기지 않습니다.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .captionStyle(.secondary)
                 }
             }
 
@@ -64,12 +62,10 @@ struct SettingsView: View {
                 }
                 if let error = hotKeySettings.registrationError {
                     Label(error, systemImage: "keyboard.badge.exclamationmark")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
+                        .captionStyle(.orange)
                 } else {
                     Text("다른 앱을 쓰는 중에도 이 조합으로 전사 창을 띄웁니다.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .captionStyle(.secondary)
                 }
 
                 LabeledContent("설정 열기") {
@@ -77,14 +73,12 @@ struct SettingsView: View {
                 }
                 if let error = settingsHotKeySettings.validationError {
                     Label(error, systemImage: "keyboard.badge.exclamationmark")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
+                        .captionStyle(.orange)
                 } else {
                     // 두 단축키의 동작 범위가 다르다는 것을 적는다. 위는 전역이고 이것은 전사
                     // 창이 앞에 있을 때만 듣는데, 같은 자리에 나란히 있으면 구분되지 않는다.
                     Text("전사 창이 앞에 있을 때 이 조합으로 설정을 엽니다. 다른 앱이 같은 조합을 쓰고 있으면 그 앱이 먼저 가져가므로, 그때는 조합을 바꿔 주세요.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .captionStyle(.secondary)
                 }
             }
 
@@ -110,8 +104,7 @@ struct SettingsView: View {
                 Text(recorder.opensFolderOnStop
                     ? "회의가 끝나면 그 회의의 폴더가 열립니다. 연속된 회의를 녹취할 때 방해가 되면 끄세요."
                     : "회의가 끝나도 폴더를 열지 않습니다. 전사 화면에 표시된 위치를 눌러 직접 열 수 있습니다.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .captionStyle(.secondary)
             }
 
             Section("버전") {
@@ -147,41 +140,36 @@ struct SettingsView: View {
         switch updateChecker.status {
         case .idle:
             Text("확인을 누를 때만 릴리즈 정보를 조회합니다. 그 외에는 네트워크를 쓰지 않습니다.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .captionStyle(.secondary)
 
         case .checking:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("릴리즈 정보를 확인하고 있습니다…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .captionStyle(.secondary)
             }
 
         case .upToDate(let current):
             Label("최신 버전입니다 (\(current))", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.green)
+                .captionStyle(.green)
 
         case .updateAvailable(let latest, let url):
             HStack(spacing: 8) {
                 Label("새 버전 \(latest)이 있습니다", systemImage: "arrow.down.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.accentColor)
+                    .captionStyle(Color.accentColor)
                 // 앱이 내려받지 않는다 — 서명 검증은 Gatekeeper의 몫으로 남긴다.
                 Button("릴리즈 페이지 열기") { NSWorkspace.shared.open(url) }
                     .buttonStyle(.link)
-                    .font(.system(size: 11))
+                    .captionSize()
             }
 
         case .failed(let message):
             HStack(spacing: 8) {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .captionStyle(.orange)
                 Button("닫기") { updateChecker.dismiss() }
                     .buttonStyle(.link)
-                    .font(.system(size: 11))
+                    .captionSize()
             }
         }
     }
