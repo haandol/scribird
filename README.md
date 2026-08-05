@@ -126,10 +126,11 @@ and a link to the relevant System Settings pane.
 
 ### Settings
 
-Interface language, meeting language, capture devices, original-audio saving, the save
-location, whether to open the session folder when a recording ends, the hotkey, and the update
-check all live in the settings window (`⌘,`). The transcript window keeps only what you look at
-during a meeting.
+Everything you set once and forget lives in the settings window (`⌘,`), split across three
+tabs — **Recording** (meeting language, original-audio saving, capture devices), **Output** (the
+save location and whether to open the session folder when a recording ends), and **General**
+(interface language, both hotkeys, and the update check). The transcript window keeps only what
+you look at during a meeting.
 
 **The interface is available in Korean and English.** It follows your system language unless
 you pick one, and picking one keeps it even if the system language later changes. Note that this
@@ -139,14 +140,19 @@ regardless of this setting, because that file is read later by other tools and i
 should not depend on a preference.
 
 <div align="center">
-  <img src="docs/images/settings.png" width="480" alt="Scribird settings window with sections for transcription, capture devices, hotkey, output location, and version" />
+  <img src="docs/images/settings.png" width="480" alt="Scribird settings window showing the Recording tab with transcription and capture device sections" />
 </div>
 
-The transcription rows are greyed out here because a recording is in progress — changing the
+> [!NOTE]
+> The screenshot predates the tabbed layout — the sections it shows are now spread across the
+> three tabs described above. The behavior it illustrates is unchanged.
+
+The transcription rows are greyed out there because a recording is in progress — changing the
 language or audio-saving mid-session would contradict the transcribers and file handles that
 already exist, and the window says so rather than failing silently. **Capture devices stay
 editable while recording**, because that's exactly when you notice you picked the wrong one.
-So does the folder-opening toggle, which is only read when a recording stops.
+So does the folder-opening toggle, which is only read when a recording stops, and so does the
+interface language, which only affects what's drawn.
 
 ## Where your data goes
 

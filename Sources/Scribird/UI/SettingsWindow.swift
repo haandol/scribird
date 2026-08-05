@@ -43,7 +43,7 @@ final class SettingsWindow {
 
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
             // 크기 조절을 주지 않는다 — 내용 높이에 맞춰 뜨는 설정 창이다.
             styleMask: [.titled, .closable],
             backing: .buffered,
@@ -69,7 +69,14 @@ final class SettingsWindow {
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         // 메뉴바 앱이라 창을 닫아도 앱이 종료되지 않아야 한다.
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(
+        // 내용 높이를 창이 따라가게 하려고 뷰가 아니라 컨트롤러로 얹는다.
+        //
+        // **탭마다 높이가 다르므로 한 번 맞추는 것으로는 부족하다.** 뷰를 직접 얹고 그때의
+        // `fittingSize`로 창을 고정하면, 더 긴 탭으로 옮길 때 아래쪽 항목이 잘린다 — 이 창에는
+        // 크기 조절 손잡이가 없어 사용자가 그것을 되돌릴 수단도 없다. `preferredContentSize`를
+        // 켠 호스팅 컨트롤러는 SwiftUI가 요구하는 크기가 바뀔 때마다 창에 알리므로, 탭을 옮기면
+        // 창 높이가 따라온다.
+        let controller = NSHostingController(
             rootView: SettingsView(
                 recorder: recorder,
                 hotKeySettings: hotKeySettings,
@@ -78,8 +85,8 @@ final class SettingsWindow {
                 languageSettings: languageSettings
             )
         )
-        // 내용이 요구하는 높이로 맞춘다. 고정 높이로 두면 항목이 잘린다.
-        window.setContentSize(window.contentView?.fittingSize ?? window.frame.size)
+        controller.sizingOptions = .preferredContentSize
+        window.contentViewController = controller
         window.center()
         window.setFrameAutosaveName("ScribirdSettings")
         return window

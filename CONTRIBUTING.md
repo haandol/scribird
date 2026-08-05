@@ -172,6 +172,11 @@ doesn't exist yet. Then confirm stopping opens the folder by itself, turn the se
 confirm stopping opens nothing while the displayed location still does. Automated tests cover
 the policy but cannot see whether a real window appeared.
 
+**Settings tabs.** Click through all three tabs and confirm none clips its last row. The window
+has no resize handle, so if it locks to the height of whichever tab opened first, a taller tab is
+cut off with no way for the user to fix it. The window is sized by a hosting controller for that
+reason, and only a real window shows whether that works.
+
 **Interface language.** Switch the language in settings and confirm the transcript window
 behind it redraws immediately. The strings come from a global value, so if a view forgets to
 observe the language it stays in the old one until reopened — and that gap is invisible unless

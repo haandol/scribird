@@ -279,7 +279,9 @@ Carbon event target nor a live capture rotation exists under `swift test`:
   the footer reports the failure instead of failing silently.
 - Open settings with `⌘,`, confirm the transcript window behind it stays visible and
   recording continues, and that the language and audio-saving rows are disabled with a
-  stated reason while recording.
+  stated reason while recording. Then click through all three tabs and confirm none of them
+  clips its last row — the window has no resize handle, so a tab taller than the one that
+  opened first has no way for the user to recover from being cut off.
 - Press the version check with the network off and confirm it reports a failure that
   leaves recording unaffected. With the network on, confirm it distinguishes "up to date"
   from a failure — silence for either would be indistinguishable to the user.
