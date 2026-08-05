@@ -148,6 +148,16 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   as the tap returning `status=0` without permission. Gate delivery behind an explicit
   active flag rather than trusting removal, or notifications arriving after stop will reopen
   captures that were already torn down.
+- **Never let a window size itself from content that sizes itself from the window.** Pairing
+  `NSHostingController.sizingOptions = .preferredContentSize` with a root view that uses
+  `.fixedSize(vertical:)` is a feedback loop: the view asks for a height, the window resizes, the
+  resize re-runs layout. Measured — switching settings tabs killed the app immediately with
+  `NSGenericException: The window has been marked as needing another Update Constraints in Window
+  pass, but it has already had more ... passes than there are views in the window`. It leaves no
+  crash report (SIGTRAP through AppKit's uncaught-exception handler), so the only way to see the
+  reason is to break on `objc_exception_throw`. The settings window is therefore a fixed size and
+  its tabs scroll inside it — an empty strip on a short tab is better than an item that can't be
+  reached, and this window has no resize handle to recover with.
 - **SwiftUI's `.keyboardShortcut` does nothing in this app.** It is dispatched through the
   menu system, and a `MenuBarExtra`-only app has no main menu (measured: `NSApp.mainMenu` is
   nil, so a shortcut attached to a button never fires even while its window is key). Intercept
@@ -279,9 +289,9 @@ Carbon event target nor a live capture rotation exists under `swift test`:
   the footer reports the failure instead of failing silently.
 - Open settings with `⌘,`, confirm the transcript window behind it stays visible and
   recording continues, and that the language and audio-saving rows are disabled with a
-  stated reason while recording. Then click through all three tabs and confirm none of them
-  clips its last row — the window has no resize handle, so a tab taller than the one that
-  opened first has no way for the user to recover from being cut off.
+  stated reason while recording. Then click through all three tabs and confirm the app survives
+  and no tab clips its last row — the crash this guards against left no crash report, so a test
+  run that never switches tabs looks clean.
 - Press the version check with the network off and confirm it reports a failure that
   leaves recording unaffected. With the network on, confirm it distinguishes "up to date"
   from a failure — silence for either would be indistinguishable to the user.

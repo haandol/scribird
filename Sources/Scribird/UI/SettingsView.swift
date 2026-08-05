@@ -63,10 +63,11 @@ struct SettingsView: View {
                 generalTab
             }
         }
-        .frame(width: 460)
-        // 탭마다 내용 높이가 다르다. 고정 높이로 두면 짧은 탭에 빈 공간이 남고 긴 탭이 잘리므로,
-        // 창이 지금 탭의 높이에 맞춰 바뀌게 둔다.
-        .fixedSize(horizontal: false, vertical: true)
+        // **높이를 내용에 맞추지 않는다.** `fixedSize(vertical:)`로 뷰가 자기 높이를 정하게 하고
+        // 창이 그것을 따라가게 하면 Auto Layout이 수렴하지 않는다 — 실측으로 탭을 바꾸는 순간
+        // 죽었다(제약 갱신 패스가 뷰 수를 넘겨 예외). 고정 크기로 두고 넘치는 내용은 `Form`이
+        // 스크롤한다. 가장 긴 탭이 이 높이 안에 들어오도록 탭 수와 묶음을 정한 것이 그 조건이다.
+        .frame(width: 460, height: 380)
     }
 
     // MARK: - 녹취 탭

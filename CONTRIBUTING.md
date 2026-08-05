@@ -172,10 +172,12 @@ doesn't exist yet. Then confirm stopping opens the folder by itself, turn the se
 confirm stopping opens nothing while the displayed location still does. Automated tests cover
 the policy but cannot see whether a real window appeared.
 
-**Settings tabs.** Click through all three tabs and confirm none clips its last row. The window
-has no resize handle, so if it locks to the height of whichever tab opened first, a taller tab is
-cut off with no way for the user to fix it. The window is sized by a hosting controller for that
-reason, and only a real window shows whether that works.
+**Settings tabs.** Click through all three tabs. Two things to watch: the app must not die, and
+no tab may clip its last row. The crash is the one that actually happened — letting the window
+size itself from the content while the content sized itself from the window made switching tabs
+throw an uncaught Auto Layout exception, and it leaves no crash report. The window is a fixed size
+now and tabs scroll inside it, so the remaining risk is a tab that needs more height than the
+window has.
 
 **Interface language.** Switch the language in settings and confirm the transcript window
 behind it redraws immediately. The strings come from a global value, so if a view forgets to

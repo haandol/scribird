@@ -43,8 +43,9 @@ final class SettingsWindow {
 
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
-            // 크기 조절을 주지 않는다 — 내용 높이에 맞춰 뜨는 설정 창이다.
+            // 뷰가 요구하는 크기와 같게 둔다. 어긋나면 첫 표시에서 내용이 잘리거나 여백이 남는다.
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 380),
+            // 크기 조절을 주지 않는다 — 탭이 그 안에서 스크롤한다.
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -69,13 +70,19 @@ final class SettingsWindow {
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         // 메뉴바 앱이라 창을 닫아도 앱이 종료되지 않아야 한다.
         window.isReleasedWhenClosed = false
-        // 내용 높이를 창이 따라가게 하려고 뷰가 아니라 컨트롤러로 얹는다.
+        // **창 크기를 내용에 따라 바꾸지 않는다.** 뷰가 자기 높이를 정하고 창이 그것을 따라가게
+        // 하면 Auto Layout이 수렴하지 않는다 — 뷰가 높이를 요구하면 창이 커지고, 커진 창이 다시
+        // 레이아웃을 유발한다. 실측: `sizingOptions = .preferredContentSize`와 뷰의
+        // `fixedSize(vertical:)`를 함께 쓴 상태에서 탭을 바꾸면 즉시 죽었다.
         //
-        // **탭마다 높이가 다르므로 한 번 맞추는 것으로는 부족하다.** 뷰를 직접 얹고 그때의
-        // `fittingSize`로 창을 고정하면, 더 긴 탭으로 옮길 때 아래쪽 항목이 잘린다 — 이 창에는
-        // 크기 조절 손잡이가 없어 사용자가 그것을 되돌릴 수단도 없다. `preferredContentSize`를
-        // 켠 호스팅 컨트롤러는 SwiftUI가 요구하는 크기가 바뀔 때마다 창에 알리므로, 탭을 옮기면
-        // 창 높이가 따라온다.
+        // ```
+        // NSGenericException: The window has been marked as needing another Update Constraints
+        // in Window pass, but it has already had more ... passes than there are views
+        // ```
+        //
+        // 그래서 창은 고정 크기이고, 내용이 그보다 길면 뷰 쪽이 스크롤한다. 탭마다 높이가 다른
+        // 것은 짧은 탭에 빈 공간이 남는 것으로 받아들인다 — 잘려서 도달할 수 없는 항목이 생기는
+        // 것보다 낫다.
         let controller = NSHostingController(
             rootView: SettingsView(
                 recorder: recorder,
@@ -85,7 +92,6 @@ final class SettingsWindow {
                 languageSettings: languageSettings
             )
         )
-        controller.sizingOptions = .preferredContentSize
         window.contentViewController = controller
         window.center()
         window.setFrameAutosaveName("ScribirdSettings")
