@@ -99,7 +99,39 @@ final class MeetingRecorder {
     ///
     /// 경로를 조립할 수 없는 상황(문서 폴더에 접근할 수 없는 환경)에서도 화면은 떠야 하므로
     /// 옵셔널이다. 표시할 것이 없다는 뜻이 되지만, 그 실패로 앱을 멈추지는 않는다.
-    var transcriptRootDirectory: URL? { try? TranscriptStore.rootDirectory() }
+    ///
+    /// 고른 폴더를 쓸 수 없는 상태에서는 되돌아갈 기본 위치를 가리킨다 — 표시된 위치와 실제
+    /// 저장 위치가 갈라지면 사용자가 회의록을 엉뚱한 곳에서 찾는다.
+    var transcriptRootDirectory: URL? { TranscriptRootLocation.resolve()?.directory }
+
+    /// 사용자가 고른 저장 루트. nil이면 앱이 정한 기본 위치를 쓴다.
+    ///
+    /// **녹취 중에는 바꿀 수 없다.** 이미 열려 있는 회의록 핸들과 오디오 컨테이너가 옛 경로를
+    /// 가리키고 있어, 도중에 바꾸면 한 회의의 산출물이 두 폴더로 쪼개진다.
+    private(set) var chosenTranscriptRoot: URL? = RecordingPreferences.transcriptRoot()
+
+    /// 저장 루트를 고른다. nil을 주면 기본 위치로 되돌린다.
+    ///
+    /// 이미 저장된 산출물은 옮기지 않는다 — 새 위치는 다음 세션부터 적용된다. 이동 중 실패하면
+    /// 재생성 불가능한 회의록을 잃고, 원본 오디오가 회의당 100MB를 넘어 그 창이 길다.
+    ///
+    /// - Returns: 바꾸지 못한 이유. 성공하면 nil이다.
+    func chooseTranscriptRoot(_ url: URL?) -> String? {
+        guard !state.isBusy else {
+            return "녹취 중에는 저장 위치를 바꿀 수 없습니다. 녹취를 끝낸 뒤에 바꿔 주세요."
+        }
+        // 고른 시점에 쓸 수 있는지 확인한다. 쓸 수 없는 곳을 조용히 받아들이면 다음 회의가
+        // 되돌림으로 시작하고, 사용자는 자기가 고른 곳에 저장되고 있다고 믿는다.
+        if let url, !TranscriptRootLocation.isUsable(url) {
+            return "그 폴더에 쓸 수 없습니다. 다른 폴더를 골라 주세요."
+        }
+        RecordingPreferences.save(transcriptRoot: url)
+        // 저장한 뒤 되읽는다. 저장은 경로 문자열이므로 되읽은 URL이 넘어온 것과 형태가 다를 수
+        // 있고(디렉터리 URL의 끝 슬래시), 화면이 들고 있는 값과 다음 세션이 읽는 값이 갈라지면
+        // 같은 폴더가 두 값으로 보인다.
+        chosenTranscriptRoot = RecordingPreferences.transcriptRoot()
+        return nil
+    }
 
     /// 이번 세션에서 실제로 살아 있는 소스. 권한이 없어 못 켠 소스는 빠진다.
     private(set) var activeSources: Set<Speaker> = []
@@ -111,6 +143,19 @@ final class MeetingRecorder {
     /// `sourceWarning`과 따로 둔다. 그쪽은 장치 변경 때마다 덮어써지므로 합치면 이 경고가
     /// 회의 도중 조용히 사라지고, 회수 위험이 있는 세션과 없는 세션을 구분할 수 없게 된다.
     private(set) var modelRetentionWarning: String?
+
+    /// 고른 저장 폴더를 쓸 수 없어 기본 위치로 되돌린 채 녹취하고 있을 때 알릴 사유.
+    ///
+    /// `sourceWarning`과 따로 둔다. 그쪽은 장치 변경 때마다 덮어써지는데, 이 경고가 그렇게
+    /// 사라지면 사용자는 자기가 고른 폴더에 저장되고 있다고 믿은 채 회의를 마친다 — 암호화
+    /// 볼륨을 고른 경우 민감한 회의록이 기본 위치에 남는다.
+    private(set) var rootFallbackWarning: String?
+
+    /// 이 세션이 쓰고 있는 저장 루트. 녹취 중이 아니면 nil이다.
+    ///
+    /// 세션 경계가 이 값을 다시 쓴다 — 경계에서 새로 결정하면 회의 도중 볼륨이 분리된 경우
+    /// 앞뒤 회의가 서로 다른 폴더로 갈라진다.
+    private var sessionRoot: URL?
 
     /// 예약하지 못한 로케일을 사용자에게 알릴 문구.
     ///
@@ -220,6 +265,7 @@ final class MeetingRecorder {
         activeSources = []
         sourceWarning = nil
         modelRetentionWarning = nil
+        rootFallbackWarning = nil
         sessionTimeOffset = 0
 
         do {
@@ -228,8 +274,16 @@ final class MeetingRecorder {
             // 켜지지 못한 소스의 세션을 아래에서 덜어내므로 변경 가능해야 한다.
             var sessions = provisioned.sessions
 
+            // 저장 루트를 세션 시작 시점에 정한다. 고른 폴더를 쓸 수 없으면 기본 위치로
+            // 되돌리고 접지 않는다 — 볼륨을 연결하지 않은 것을 잊었다고 회의를 잃으면 안 된다.
+            guard let rootLocation = TranscriptRootLocation.resolve() else {
+                throw RecorderError.noWritableTranscriptRoot
+            }
+            rootFallbackWarning = TranscriptRootLocation.warning(for: rootLocation)
+            sessionRoot = rootLocation.directory
+
             let startedAt = Date()
-            let store = try TranscriptStore(startedAt: startedAt)
+            let store = try TranscriptStore(startedAt: startedAt, root: rootLocation.directory)
             let audioRecorder = savesAudio
                 ? AudioRecorder(directory: store.sessionDirectory)
                 : nil
@@ -748,7 +802,13 @@ final class MeetingRecorder {
         await drainPendingUtterances(into: previousStore)
 
         do {
-            let store = try TranscriptStore(startedAt: boundary)
+            // 이 세션이 쓰고 있는 루트를 그대로 쓴다. 경계에서 다시 결정하면 회의 도중 볼륨이
+            // 분리된 경우 앞뒤 회의가 서로 다른 폴더로 갈라지고, 저장 위치는 녹취 중에 바뀌지
+            // 않는다는 계약과도 어긋난다.
+            guard let root = sessionRoot else {
+                throw RecorderError.noWritableTranscriptRoot
+            }
+            let store = try TranscriptStore(startedAt: boundary, root: root)
             // 오디오도 같은 경계에서 갈아 끼운다. 컨테이너를 닫아야 파일이 열린다.
             let audioFiles = audioRecorder?.rotate(to: store.sessionDirectory) ?? []
             lastSessionDirectory = await previousStore?.finalize(audioFiles: audioFiles)
@@ -861,6 +921,7 @@ final class MeetingRecorder {
         startedAt = nil
         // 녹취가 끝났으므로 "지금 쓰이는 곳"은 없다. 직전 세션 위치는 따로 남아 있다.
         currentSessionDirectory = nil
+        sessionRoot = nil
         sessionTimeOffset = 0
         if !reservedLocales.isEmpty {
             await SpeechModelInstaller.release(locales: reservedLocales)
@@ -887,11 +948,15 @@ final class MeetingRecorder {
 
     enum RecorderError: LocalizedError {
         case noCompatibleAudioFormat
+        /// 고른 폴더도 기본 위치도 쓸 수 없다. 되돌릴 곳조차 없는 경우다.
+        case noWritableTranscriptRoot
 
         var errorDescription: String? {
             switch self {
             case .noCompatibleAudioFormat:
                 "전사 모델과 호환되는 오디오 포맷을 찾지 못했습니다."
+            case .noWritableTranscriptRoot:
+                "회의록을 저장할 폴더를 열 수 없습니다. 설정에서 저장 위치를 확인해 주세요."
             }
         }
     }

@@ -35,6 +35,14 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
         try? FileManager.default.removeItem(at: sandbox)
     }
 
+    /// 기본 저장 루트에 세션을 연다. `HOME`을 임시 디렉터리로 바꿔 두었으므로 그 안으로 들어온다.
+    private func makeStore() throws -> TranscriptStore {
+        try TranscriptStore(
+            startedAt: Date(),
+            root: TranscriptRootLocation.standardDirectory()
+        )
+    }
+
     private func segment(
         _ text: String, _ start: Double, _ end: Double,
         locale: String? = "ko-KR"
@@ -60,7 +68,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     /// 늦게 도착하는 것 자체는 정상이지만, 흔적 없이 버리면 유실이 일어난 사실조차 알 수 없다.
     /// 이 카운터가 순서 위반을 드러내는 유일한 신호다.
     func test_appendAfterFinalize_isCountedNotSilentlyDropped() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
         await store.append(segment("회의 중 발화입니다.", 0, 1.5))
         _ = await store.finalize(audioFiles: [])
 
@@ -76,7 +84,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     /// 이것이 관측된 증상의 정체다. 한쪽이라도 남으면 복원할 수 있지만, 이 순서에서는 즉시
     /// 기록도 읽기용 회의록도 그 발화를 갖지 못한다.
     func test_appendAfterFinalize_missesBothOutputs() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
         await store.append(segment("남아야 하는 발화.", 0, 1))
         let directory = await store.finalize(audioFiles: [])
 
@@ -93,7 +101,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
 
     /// 정상 순서에서는 하나도 버려지지 않는다.
     func test_appendBeforeFinalize_dropsNothing() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
 
         for index in 0..<5 {
             await store.append(segment("발화\(index)", Double(index), Double(index) + 0.5))
@@ -119,7 +127,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     /// 태스크로 미루면, 그 태스크가 실행되기 전에 세션이 닫힐 수 있다.
     @MainActor
     func test_committing_persistsBeforeReturning() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
         let timeline = TranscriptTimeline()
 
         await MeetingRecorder.commit(segment("화면에 보인 발화.", 0, 1.5), to: timeline, store: store)
@@ -135,7 +143,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     ///
     /// 이것이 실제 시나리오다 — 회의 끝에 짧은 발화가 확정되고 사용자가 바로 중지를 누른다.
     func test_committingThenImmediatelyFinalizing_losesNothing() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
         let timeline = await TranscriptTimeline()
 
         for index in 0..<5 {
@@ -169,7 +177,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     /// 기다리지 않으면 마지막 발화들이 회의록 생성 이후에 도착한다 — 관측된 유실이 회의 끝에
     /// 몰린 짧은 발화에서 나타난 이유다.
     func test_flushingArbiter_completesBeforeReturning() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
         let arbiter = await LanguageArbiter { segment in
             await store.append(segment)
         }
@@ -193,7 +201,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     ///
     /// 하나만 확인하면 "마지막 하나만 기다린다"는 구현도 통과한다.
     func test_flushingArbiter_persistsEveryPendingSegment() async throws {
-        let store = try TranscriptStore(startedAt: Date())
+        let store = try makeStore()
         let arbiter = await LanguageArbiter { segment in
             await store.append(segment)
         }

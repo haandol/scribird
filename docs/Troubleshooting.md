@@ -163,6 +163,25 @@ interrupted by a crash or power loss. `transcript.jsonl` will still be complete 
 last finalized utterance, because it is appended and fsynced per segment rather than
 buffered until the end.
 
+### The transcript isn't in the folder I chose
+
+Scribird records into the default location when the folder you picked can't be written at the
+moment a session starts — an ejected drive or a deleted synced folder. It shows a notice when
+that happens, but if you missed it, look at the path in the transcript window footer: that is
+always where the session actually went, not where you pointed it.
+
+Your choice is **not** erased by the fallback. Re-attach the volume and the next session returns
+to it — no need to pick the folder again. Verify with:
+
+```bash
+defaults read com.scribird.app transcriptRootPath
+```
+
+If that path is on a volume that isn't mounted, that's the cause. Sessions recorded before you
+changed the location stay in the old folder — Scribird never moves existing transcripts, so a
+half-finished move can't lose a meeting you can't re-record. Check both places if a meeting seems
+missing.
+
 ## Check for conflicts
 
 - **Zoom, Teams, and Scribird can share the microphone.** macOS input devices are

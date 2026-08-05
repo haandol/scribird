@@ -154,8 +154,9 @@ paths need a manual pass:
 
 **Capture.** Build and install the bundle, start a recording, confirm both level meters move,
 speak and play remote audio, then stop. Verify `transcript.jsonl`, `transcript.md`, `me.m4a`,
-and `remote.m4a` exist in `~/Documents/Scribird/<date_time>/`, and that the `.m4a` files
-actually open — a container that was never finalized still has bytes on disk.
+and `remote.m4a` exist in `~/Documents/Scribird/<date_time>/` (or under the save location if you
+changed it), and that the `.m4a` files actually open — a container that was never finalized still
+has bytes on disk.
 
 **Session rotation.** While recording, start a new session, keep speaking, then stop. Two
 session directories must exist, each with a playable `.m4a` and a `transcript.md` whose
@@ -170,6 +171,16 @@ recorded, where it points at the root and opening it must still work even though
 doesn't exist yet. Then confirm stopping opens the folder by itself, turn the setting off, and
 confirm stopping opens nothing while the displayed location still does. Automated tests cover
 the policy but cannot see whether a real window appeared.
+
+**Save location.** Point the save location at another folder in settings, record, and confirm
+the session directory is created there and the footer path matches. Then point it at a removable
+volume, eject it, and start recording: the session must land in the default location **with a
+notice saying why**, and settings must still list the chosen folder — the fallback keeps the
+choice so re-attaching the volume returns the next session to it. Confirm the earlier sessions
+stay where they were; the app never moves them. While recording, the location row must be
+disabled with a stated reason. Changing it mid-session would leave one meeting's `.m4a` and
+`transcript.md` in two folders, which is the failure this lock prevents and only appears with a
+live capture.
 
 **Device switching.** While recording, plug in a headset (or change the output device in
 System Settings › Sound). The remote level meter must resume within about a second, a notice

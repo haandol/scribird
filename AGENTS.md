@@ -115,6 +115,17 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   ignores default-device changes, but a pin whose device is absent falls back to the default
   *and keeps the selection* — erasing it would lose the choice when the headset is
   re-plugged, and refusing to fall back would keep capturing silence.
+- **An unusable save location falls back; it never refuses to record.** The user can point the
+  output root at a synced folder or an external volume, so it can be gone when a session starts.
+  Recording into the default location and saying so is recoverable; declining to start loses the
+  meeting, and a meeting happens once. The same asymmetry as a missing pinned device — and like
+  that case, **the fallback keeps the user's choice** so reconnecting the volume restores it.
+  Judge the folder by trying to create it and checking writability, not by the stored path
+  existing: a detached volume leaves the path behind. **Resolve the root once per session and
+  reuse it across a session boundary** — re-resolving at the boundary splits one meeting's
+  successor into a different folder mid-recording. The app never moves or deletes the user's
+  existing output: a half-finished move of a meeting that cannot be re-recorded is worse than
+  transcripts living in two folders.
 - **Resolve a device UID by the returned device number, not the status.**
   `kAudioHardwarePropertyTranslateUIDToDevice` returned `status=0` for a UID that does not
   exist and handed back device `0`. Trusting the status opens capture on device zero, which
@@ -253,6 +264,12 @@ Carbon event target nor a live capture rotation exists under `swift test`:
 - Press the version check with the network off and confirm it reports a failure that
   leaves recording unaffected. With the network on, confirm it distinguishes "up to date"
   from a failure — silence for either would be indistinguishable to the user.
+- Point the save location at another folder, record, and confirm the session lands there and
+  that the footer path matches. Then point it at a removable volume, eject it, and start
+  recording: it must record into the default location, say why, and still list the chosen
+  folder in settings. Re-attach the volume and confirm the next session returns to it. While
+  recording, confirm the location row is disabled with a stated reason — a `.m4a` split across
+  two folders is the failure this prevents, and it only shows up with a live capture.
 
 ## Commit & Pull Request Guidelines
 

@@ -77,6 +77,32 @@ enum RecordingPreferences {
         defaults.set(opensFolderOnStop, forKey: opensFolderKey)
     }
 
+    // MARK: - 저장 위치
+
+    private static let transcriptRootKey = "transcriptRootPath"
+
+    /// 사용자가 고른 저장 루트. nil이면 앱이 정한 기본 위치를 쓴다.
+    ///
+    /// **경로를 저장한다.** 이 앱은 App Sandbox를 쓰지 않으므로 임의 경로에 접근할 수 있고,
+    /// security-scoped bookmark가 필요 없다. 폴더가 지워지거나 볼륨이 분리되면 경로만 남는데,
+    /// 그 판정은 저장이 아니라 사용 시점에 한다 — 저장된 값이 유효하지 않다고 지우면 볼륨을
+    /// 다시 연결했을 때 사용자의 선택이 이미 사라져 있다.
+    static func transcriptRoot(from defaults: UserDefaults = .standard) -> URL? {
+        guard let path = defaults.string(forKey: transcriptRootKey), !path.isEmpty else {
+            return nil
+        }
+        return URL(filePath: path, directoryHint: .isDirectory)
+    }
+
+    /// 저장 루트를 고정하거나(url) 기본 위치로 되돌린다(nil).
+    static func save(transcriptRoot url: URL?, to defaults: UserDefaults = .standard) {
+        if let url {
+            defaults.set(url.path(percentEncoded: false), forKey: transcriptRootKey)
+        } else {
+            defaults.removeObject(forKey: transcriptRootKey)
+        }
+    }
+
     // MARK: - 캡처 장치 선택
 
     /// 소스별 장치 선택 키.

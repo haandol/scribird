@@ -6,34 +6,22 @@ import Foundation
 /// 크래시 한 번에 회의록 전체를 잃는다. 그래서 final 세그먼트가 나올 때마다
 /// JSONL 한 줄을 파일 핸들로 바로 흘려보낸다.
 actor TranscriptStore {
-    /// `~/Documents/Scribird/` 아래 세션별 디렉터리.
+    /// 저장 루트 아래의 세션별 디렉터리.
     let sessionDirectory: URL
     private let jsonlURL: URL
     private var handle: FileHandle?
     private let encoder = JSONEncoder()
     private var segments: [TranscriptSegment.Record] = []
 
-    /// 세션 디렉터리들이 모이는 곳. 화면에 표시하고 열기 위해 세션 없이도 필요하다.
-    ///
-    /// 산출물 위치의 주인이 이 타입이므로 여기서 계산한다 — 같은 경로 조립이 화면 코드에도
-    /// 있으면 한쪽만 고쳐졌을 때 표시된 위치와 실제 저장 위치가 갈라진다.
-    static func rootDirectory() throws -> URL {
-        try FileManager.default.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appending(path: "Scribird", directoryHint: .isDirectory)
-    }
-
-    /// - Parameter startedAt: 세션 시작 시각. 디렉터리 이름과 회의록 헤더에 쓴다.
-    init(startedAt: Date) throws {
+    /// - Parameters:
+    ///   - startedAt: 세션 시작 시각. 디렉터리 이름과 회의록 헤더에 쓴다.
+    ///   - root: 세션 디렉터리를 만들 저장 루트. 사용자가 고른 폴더일 수 있으므로 호출자가
+    ///     정해서 넘긴다 — 이 타입이 직접 계산하면 되돌림 판정이 두 곳에 생긴다.
+    init(startedAt: Date, root: URL) throws {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let name = formatter.string(from: startedAt)
-
-        let root = try Self.rootDirectory()
 
         sessionDirectory = root.appending(path: name, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(

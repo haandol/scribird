@@ -203,6 +203,19 @@ struct TranscriptView: View {
                         pane: nil
                     )
                 }
+
+                if let warning = recorder.rootFallbackWarning {
+                    // 고른 폴더를 쓸 수 없어 기본 위치에 기록 중인 세션. 이것을 알리지 않으면
+                    // 사용자는 자기가 고른 폴더에 저장되고 있다고 믿은 채 회의를 마치고, 암호화
+                    // 볼륨을 고른 경우 민감한 회의록이 기본 위치에 남는다. 아래 저장 위치 표시가
+                    // 실제 경로를 가리키므로 여기서는 사유만 적는다.
+                    inlineNotice(
+                        warning,
+                        systemImage: "folder.badge.questionmark",
+                        tint: .orange,
+                        pane: nil
+                    )
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

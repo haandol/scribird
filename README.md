@@ -146,6 +146,14 @@ Each session gets its own directory, named for the moment it started:
 ~/Documents/Scribird/2026-07-31_142530/
 ```
 
+**You can put that folder somewhere else.** Settings → Save location lets you pick any folder —
+a synced folder so meetings reach your other machines, an external volume, or an encrypted disk.
+Pick nothing and it stays where it is above. Two things to know: existing transcripts are **not**
+moved when you change it (the app never relocates your files — a half-finished move of a meeting
+you can't re-record is worse than two folders), and if the folder you picked is gone at the
+moment you start recording — an unplugged drive — Scribird records into the default location
+instead and tells you so. It does not refuse to record, because a meeting happens once.
+
 **The transcript window always shows where recordings are stored**, so you can confirm one is
 actually being saved without waiting for it to end. Click it to open that folder. What it
 points at follows the app's state — the session being written to while recording, the last one
@@ -431,8 +439,8 @@ tccutil reset AudioCapture com.scribird.app
 
 > [!TIP]
 > Your meetings are **not** removed by any of the above. Transcripts and audio stay in
-> `~/Documents/Scribird/` until you delete them yourself, which is deliberate — an
-> uninstall should not throw away a meeting record.
+> `~/Documents/Scribird/` — or wherever you pointed the save location — until you delete them
+> yourself, which is deliberate — an uninstall should not throw away a meeting record.
 
 ---
 
