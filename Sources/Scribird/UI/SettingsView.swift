@@ -6,9 +6,11 @@ import SwiftUI
 /// 둘을 같은 화면에 두면 설정이 늘어날 때마다 트랜스크립트 자리가 줄어든다.
 ///
 /// **항목을 탭으로 나눈다.** 한 화면에 다 쌓으면 항목이 늘어날 때마다 창이 길어지고, 결국
-/// 화면 높이를 넘겨 스크롤해야 찾을 수 있는 항목이 생긴다. 탭은 세 개뿐이다 — 회의 전에 정하는
-/// 것, 산출물이 가는 곳, 그 밖의 것. 탭을 항목 수만큼 늘리면 어느 탭에 무엇이 있는지를 사용자가
-/// 외워야 하므로, 묶음을 성격으로 가르고 그 수를 적게 유지한다.
+/// 화면 높이를 넘겨 스크롤해야 찾을 수 있는 항목이 생긴다.
+///
+/// 탭은 세 개뿐이고, 가르는 기준은 **그 값이 무엇에 대한 것인가**다 — 앱 자체(일반), 녹취하면
+/// 무엇이 어디에 남는가(녹취), 어느 하드웨어에서 받는가(장치). 탭을 항목 수만큼 늘리면 어느 탭에
+/// 무엇이 있는지를 사용자가 외워야 하므로, 수를 적게 유지한다.
 struct SettingsView: View {
     let recorder: MeetingRecorder
     let hotKeySettings: HotKeySettings
@@ -28,39 +30,41 @@ struct SettingsView: View {
     ///
     /// 이름을 `Tab`으로 두지 않는다 — SwiftUI의 `Tab`을 가려서 탭을 만들 수 없게 된다.
     private enum Pane: Hashable, CaseIterable {
-        case recording
-        case output
         case general
+        case recording
+        case device
 
         var title: String {
             switch self {
-            case .recording: tr("녹취", "Recording")
-            case .output: tr("산출물", "Output")
             case .general: tr("일반", "General")
+            case .recording: tr("녹취", "Recording")
+            case .device: tr("장치", "Device")
             }
         }
 
         var symbol: String {
             switch self {
-            case .recording: "waveform"
-            case .output: "folder"
             case .general: "gearshape"
+            case .recording: "waveform"
+            case .device: "mic"
             }
         }
     }
 
-    @State private var pane: Pane = .recording
+    /// 「일반」에서 시작한다 — 앱을 처음 만지는 사용자가 화면 언어부터 찾을 수 있어야 하고,
+    /// macOS 앱의 설정 창이 그 탭에서 열리는 것이 관례다.
+    @State private var pane: Pane = .general
 
     var body: some View {
         TabView(selection: $pane) {
+            Tab(Pane.general.title, systemImage: Pane.general.symbol, value: Pane.general) {
+                generalTab
+            }
             Tab(Pane.recording.title, systemImage: Pane.recording.symbol, value: Pane.recording) {
                 recordingTab
             }
-            Tab(Pane.output.title, systemImage: Pane.output.symbol, value: Pane.output) {
-                outputTab
-            }
-            Tab(Pane.general.title, systemImage: Pane.general.symbol, value: Pane.general) {
-                generalTab
+            Tab(Pane.device.title, systemImage: Pane.device.symbol, value: Pane.device) {
+                deviceTab
             }
         }
         // **높이를 내용에 맞추지 않는다.** `fixedSize(vertical:)`로 뷰가 자기 높이를 정하게 하고
@@ -70,102 +74,11 @@ struct SettingsView: View {
         .frame(width: 460, height: 380)
     }
 
-    // MARK: - 녹취 탭
-
-    /// 회의를 시작하기 전에 정하는 것들. 이 탭의 항목은 녹취 중 잠기는 것과 그렇지 않은 것이
-    /// 섞여 있으므로, 각 섹션이 자기 잠금 여부와 이유를 따로 적는다.
-    private var recordingTab: some View {
-        Form {
-            Section(tr("전사", "Transcription")) {
-                Picker(tr("회의 언어", "Meeting language"), selection: Binding(
-                    get: { recorder.language },
-                    set: { recorder.language = $0 }
-                )) {
-                    ForEach(TranscriptionLanguage.allCases) { language in
-                        Text(language.displayName).tag(language)
-                    }
-                }
-                .disabled(recorder.state.isBusy)
-
-                Toggle(tr("음성 원본 저장", "Save original audio"), isOn: Binding(
-                    get: { recorder.savesAudio },
-                    set: { recorder.savesAudio = $0 }
-                ))
-                .disabled(recorder.state.isBusy)
-
-                // 잠긴 이유를 적지 않으면 사용자는 앱이 고장 났다고 판단한다.
-                if recorder.state.isBusy {
-                    Text(tr("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 전사기와 파일에 반영되지 않기 때문입니다.",
-                             "Can't be changed while recording — it wouldn't reach the transcribers and files already in use."))
-                        .captionStyle(.secondary)
-                }
-            }
-
-            // 이 섹션은 녹취 중에도 잠그지 않는다. 장치를 잘못 골라 회의가 비어 있는 것을
-            // 발견하는 시점이 회의 중이므로, 그때 고칠 수 없으면 목적을 잃는다.
-            Section(tr("캡처 장치", "Capture devices")) {
-                CaptureDevicePicker(
-                    recorder: recorder,
-                    change: .input,
-                    title: tr("마이크 (나)", "Microphone (Me)")
-                )
-                CaptureDevicePicker(
-                    recorder: recorder,
-                    change: .output,
-                    title: tr("시스템 오디오 (상대방)", "System audio (Remote)")
-                )
-
-                if recorder.state.isBusy {
-                    Text(tr("녹취 중에 바꾸면 그 소스만 새 장치로 다시 연결됩니다. 회의록은 끊기지 않습니다.",
-                             "Changing this while recording reconnects only that source. The transcript is not interrupted."))
-                        .captionStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    // MARK: - 산출물 탭
-
-    /// 회의록과 음성 원본이 가는 곳. 두 항목 모두 산출물의 행선지를 정한다.
-    private var outputTab: some View {
-        Form {
-            Section(tr("저장 위치", "Save location")) {
-                transcriptRootRow
-
-                // 이 항목은 녹취 중에도 잠그지 않는다. 종료 시점에만 읽히는 값이라 이미
-                // 만들어진 전사기나 열려 있는 파일과 어긋나지 않는다 — 언어·원본 저장을
-                // 잠그는 근거가 여기엔 없다.
-                Toggle(tr("녹취를 끝내면 저장 폴더 열기", "Open the save folder when recording stops"), isOn: Binding(
-                    get: { recorder.opensFolderOnStop },
-                    set: { recorder.opensFolderOnStop = $0 }
-                ))
-
-                Text(recorder.opensFolderOnStop
-                    ? tr("회의가 끝나면 그 회의의 폴더가 열립니다. 연속된 회의를 녹취할 때 방해가 되면 끄세요.",
-                         "When a meeting ends, its folder opens. Turn this off if it gets in the way of back-to-back meetings.")
-                    : tr("회의가 끝나도 폴더를 열지 않습니다. 전사 화면에 표시된 위치를 눌러 직접 열 수 있습니다.",
-                         "Nothing opens when a meeting ends. Click the location shown in the transcript window to open it yourself."))
-                    .captionStyle(.secondary)
-            }
-
-        }
-        .formStyle(.grouped)
-    }
-
     // MARK: - 일반 탭
 
-    /// 앱 자체에 관한 것 — 화면 언어, 단축키, 버전.
+    /// 앱 자체에 관한 것 — 화면 언어, 단축키, 버전. 회의 내용이나 산출물과 무관한 값만 둔다.
     private var generalTab: some View {
         Form {
-            // 화면 언어를 이 탭의 맨 위에 둔다.
-            //
-            // 탭으로 나누면서 이 항목이 첫 화면에서 밀려났다. 읽을 수 없는 화면에서 언어 설정을
-            // 찾아야 하는 상황을 만들지 않는 것이 이 항목의 근거이므로, 그 근거가 약해지는 것은
-            // 사실이다. 그래도 받아들이는 이유: 탭 세 개가 항상 한눈에 보여 스크롤이 필요 없고,
-            // 톱니 아이콘이 「일반」의 관례적 표시이며, 항목의 선택지 자체가 「한국어」·「English」로
-            // 각 언어 사용자에게 읽힌다. 탭을 늘려 언어 전용 탭을 만드는 것이 더 나쁘다 — 탭
-            // 하나가 항목 하나를 담게 된다.
             Section(tr("화면", "Appearance")) {
                 Picker(tr("화면 언어", "Interface language"), selection: Binding(
                     get: { languageSettings.language },
@@ -218,6 +131,100 @@ struct SettingsView: View {
             Section(tr("버전", "Version")) {
                 versionRow
                 updateStatusRow
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - 녹취 탭
+
+    /// **녹취하면 무엇이 어디에 남는가**를 정하는 것들 — 인식 언어, 음성 원본을 남길지, 산출물이
+    /// 갈 폴더, 끝났을 때 그 폴더를 열지.
+    ///
+    /// 이 탭의 항목은 녹취 중 잠기는 것과 그렇지 않은 것이 섞여 있으므로, 각 섹션이 자기 잠금
+    /// 여부와 이유를 따로 적는다.
+    private var recordingTab: some View {
+        Form {
+            Section(tr("전사", "Transcription")) {
+                Picker(tr("회의 언어", "Meeting language"), selection: Binding(
+                    get: { recorder.language },
+                    set: { recorder.language = $0 }
+                )) {
+                    ForEach(TranscriptionLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                .disabled(recorder.state.isBusy)
+
+                // 잠긴 이유를 적지 않으면 사용자는 앱이 고장 났다고 판단한다.
+                if recorder.state.isBusy {
+                    Text(tr("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 전사기와 파일에 반영되지 않기 때문입니다.",
+                             "Can't be changed while recording — it wouldn't reach the transcribers and files already in use."))
+                        .captionStyle(.secondary)
+                }
+            }
+
+            Section(tr("산출물", "Output")) {
+                // 원본을 남길지가 저장 위치와 같은 섹션에 있는 이유는 둘 다 산출물의 구성을
+                // 정하기 때문이다. "무엇을 남길까"와 "어디에 남길까"를 떼어 놓으면 한 결정을
+                // 두 자리에서 하게 된다.
+                Toggle(tr("음성 원본 저장", "Save original audio"), isOn: Binding(
+                    get: { recorder.savesAudio },
+                    set: { recorder.savesAudio = $0 }
+                ))
+                .disabled(recorder.state.isBusy)
+
+                Text(recorder.savesAudio
+                    ? tr("회의록과 함께 소스별 음성 원본을 남깁니다. 나중에 다시 전사할 수 있습니다.",
+                         "Keeps per-source original audio alongside the transcript, so you can re-transcribe later.")
+                    : tr("회의록만 남기고 음성 원본은 저장하지 않습니다.",
+                         "Keeps only the transcript — no original audio is saved."))
+                    .captionStyle(.secondary)
+
+                transcriptRootRow
+
+                // 이 항목은 녹취 중에도 잠그지 않는다. 종료 시점에만 읽히는 값이라 이미
+                // 만들어진 전사기나 열려 있는 파일과 어긋나지 않는다 — 언어·원본 저장을
+                // 잠그는 근거가 여기엔 없다.
+                Toggle(tr("녹취를 끝내면 저장 폴더 열기", "Open the save folder when recording stops"), isOn: Binding(
+                    get: { recorder.opensFolderOnStop },
+                    set: { recorder.opensFolderOnStop = $0 }
+                ))
+
+                Text(recorder.opensFolderOnStop
+                    ? tr("회의가 끝나면 그 회의의 폴더가 열립니다. 연속된 회의를 녹취할 때 방해가 되면 끄세요.",
+                         "When a meeting ends, its folder opens. Turn this off if it gets in the way of back-to-back meetings.")
+                    : tr("회의가 끝나도 폴더를 열지 않습니다. 전사 화면에 표시된 위치를 눌러 직접 열 수 있습니다.",
+                         "Nothing opens when a meeting ends. Click the location shown in the transcript window to open it yourself."))
+                    .captionStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - 장치 탭
+
+    /// 어느 하드웨어에서 소리를 받을지. 이 탭만 녹취 중에도 전부 열려 있다 — 장치를 잘못 골라
+    /// 회의가 비어 있는 것을 발견하는 시점이 회의 중이므로, 그때 고칠 수 없으면 목적을 잃는다.
+    private var deviceTab: some View {
+        Form {
+            Section(tr("캡처 장치", "Capture devices")) {
+                CaptureDevicePicker(
+                    recorder: recorder,
+                    change: .input,
+                    title: tr("마이크 (나)", "Microphone (Me)")
+                )
+                CaptureDevicePicker(
+                    recorder: recorder,
+                    change: .output,
+                    title: tr("시스템 오디오 (상대방)", "System audio (Remote)")
+                )
+
+                if recorder.state.isBusy {
+                    Text(tr("녹취 중에 바꾸면 그 소스만 새 장치로 다시 연결됩니다. 회의록은 끊기지 않습니다.",
+                             "Changing this while recording reconnects only that source. The transcript is not interrupted."))
+                        .captionStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

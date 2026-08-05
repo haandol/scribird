@@ -126,11 +126,11 @@ and a link to the relevant System Settings pane.
 
 ### Settings
 
-Everything you set once and forget lives in the settings window (`⌘,`), split across three
-tabs — **Recording** (meeting language, original-audio saving, capture devices), **Output** (the
-save location and whether to open the session folder when a recording ends), and **General**
-(interface language, both hotkeys, and the update check). The transcript window keeps only what
-you look at during a meeting.
+Everything you set once and forget lives in the settings window (`⌘,`), split across three tabs
+by what the setting is *about* — **General** (interface language, both hotkeys, the update check),
+**Recording** (meeting language, plus what the output contains and where it goes), and **Device**
+(which microphone and which output device to capture). The transcript window keeps only what you
+look at during a meeting.
 
 **The interface is available in Korean and English.** It follows your system language unless
 you pick one, and picking one keeps it even if the system language later changes. Note that this
@@ -140,7 +140,7 @@ regardless of this setting, because that file is read later by other tools and i
 should not depend on a preference.
 
 <div align="center">
-  <img src="docs/images/settings.png" width="480" alt="Scribird settings window showing the Recording tab with transcription and capture device sections" />
+  <img src="docs/images/settings.png" width="480" alt="Scribird settings window showing transcription and capture device settings" />
 </div>
 
 > [!NOTE]
