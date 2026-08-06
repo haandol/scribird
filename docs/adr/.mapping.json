@@ -51,6 +51,11 @@
           "path": "docs/adr/transcription/0003-model-provisioning-gate.md",
           "status": "Proposed",
           "summary": "모델 설치가 끝난 뒤 오디오 포맷을 확정하고 캡처를 시작한다 (예약 실패는 잔여 예약 회수 후 재시도하고, 모델이 설치돼 있으면 경고로 강등)"
+        },
+        {
+          "path": "docs/adr/transcription/0004-in-session-language-switch.md",
+          "status": "Proposed",
+          "summary": "회의 언어를 녹취 중에도 바꾸고 캡처·원본 오디오·회의록을 끊지 않는다 (미설치 언어는 기존 언어로 전사하며 내려받고, 실패 시 기존 언어 유지)"
         }
       ],
       "dependsOn": [

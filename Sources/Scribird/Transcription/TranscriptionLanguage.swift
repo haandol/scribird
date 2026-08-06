@@ -34,4 +34,24 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable, Sendable {
 
     /// 언어가 둘 이상이면 결과 중재가 필요하다.
     var needsArbitration: Bool { locales.count > 1 }
+
+    /// 한 구성에서 다른 구성으로 옮길 때 실제로 바뀌는 로케일.
+    ///
+    /// **양쪽에 다 있는 로케일은 어디에도 넣지 않는다.** 그 전사기를 그대로 두는 것이
+    /// 규칙이라서다 — 새로 만들면 진행 중이던 그 언어의 발화까지 잃는다. 같은 구성으로
+    /// 바꾸면 양쪽이 비어, 분석기를 건드릴 이유가 없다는 것이 이 값으로 드러난다.
+    func localeDifference(
+        from previous: TranscriptionLanguage
+    ) -> (added: [Locale], removed: [Locale]) {
+        let before = previous.locales
+        let after = locales
+        return (
+            added: after.filter { locale in
+                !before.contains { $0.identifier == locale.identifier }
+            },
+            removed: before.filter { locale in
+                !after.contains { $0.identifier == locale.identifier }
+            }
+        )
+    }
 }

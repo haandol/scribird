@@ -48,6 +48,7 @@ written to disk.
 | **Automatic speaker attribution** | Microphone is *me*, system output is *remote*. The audio path decides the speaker, so there is nothing to infer and nothing to get wrong |
 | **Live transcription** | Volatile text appears dimmed while you speak and sharpens once finalized. Finalized text is written to disk immediately |
 | **Korean + English** | Both languages are recognized at once. Code-switching meetings keep both sides thanks to token-level arbitration |
+| **Switch language mid-meeting** | Pick the meeting language from the transcript window at any time, including while recording. The audio, the transcript, and the `.m4a` files all continue — only the transcribers change |
 | **Original audio kept** | One `.m4a` per source, captured before resampling — you can re-transcribe later |
 | **Silent failures surfaced** | A denied permission raises no error; it just delivers silence. Scribird judges by amplitude and warns you mid-recording |
 | **Input level meters** | Per-source dBFS in real time with the recommended range marked, so you don't find out after the meeting |
@@ -131,6 +132,13 @@ by what the setting is *about* — **General** (interface language, both hotkeys
 **Recording** (meeting language, plus what the output contains and where it goes), and **Device**
 (which microphone and which output device to capture). The transcript window keeps only what you
 look at during a meeting.
+
+**The meeting language is in both places on purpose.** You set it before a meeting in settings,
+but you find out it was wrong *during* one — a missing utterance is the signal — so the transcript
+window carries the same picker. Changing it there does not interrupt anything: capture keeps
+running, the `.m4a` files keep growing, and the transcript continues in the same file. If the
+model for the language you picked isn't installed yet, macOS downloads it while the previous
+language keeps transcribing, and the switch happens once it's ready.
 
 **The interface is available in Korean and English.** It follows your system language unless
 you pick one, and picking one keeps it even if the system language later changes. Note that this

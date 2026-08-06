@@ -30,6 +30,34 @@ struct TranscriptView: View {
         .frame(width: 480, height: 540)
     }
 
+    // MARK: - 회의 언어
+
+    /// 현재 회의 언어를 읽고 그 자리에서 바꾼다.
+    ///
+    /// 표시하는 값은 사용자가 고른 것이 아니라 **지금 실제로 동작 중인 구성**이다. 전환이
+    /// 실패하면 이전 언어로 계속 기록되므로, 고른 값을 보여주면 어느 언어로 인식되는지가
+    /// 실제와 어긋나 결과를 해석할 수 없다. 다운로드를 기다리는 중일 때만 대상 언어를 보여준다.
+    private var languagePicker: some View {
+        Picker("", selection: Binding(
+            get: { recorder.pendingLanguage ?? recorder.language },
+            set: { next in Task { await recorder.chooseLanguage(next) } }
+        )) {
+            ForEach(TranscriptionLanguage.allCases) { language in
+                Text(language.displayName).tag(language)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(recorder.isPreparingModel)
+        .help(recorder.pendingLanguage.map {
+            tr("\($0.displayName) 모델을 내려받는 중입니다. 그동안 \(recorder.language.displayName)로 계속 기록합니다.",
+               "Downloading the \($0.displayName) model. Recording continues in \(recorder.language.displayName) until it's ready.")
+        } ?? tr("인식할 회의 언어입니다. 녹취 중에 바꿔도 소리와 회의록은 끊기지 않습니다.",
+                "The meeting language to recognize. Changing it while recording does not interrupt the audio or transcript."))
+    }
+
     // MARK: - 헤더
 
     private var header: some View {
@@ -46,14 +74,9 @@ struct TranscriptView: View {
 
             Spacer()
 
-            // 언어 구성은 설정에서 바꾸지만, 어느 언어로 인식되는지 모르면 결과를
-            // 해석할 수 없으므로 현재 값은 여기서 읽을 수 있어야 한다.
-            Text(recorder.language.displayName)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.quaternary, in: .rect(cornerRadius: 5))
+            // 언어 구성이 틀렸다는 것을 발견하는 화면이 여기다 — 빠진 발화로 신호가 나므로,
+            // 고치는 조작도 여기 있어야 한다. 녹취 중 전환은 소리와 회의록을 끊지 않는다.
+            languagePicker
 
             // 회의가 바뀔 때 산출물을 끊는다. 녹취 중에도 캡처를 끊지 않고 넘어가므로
             // 다음 회의 도입부를 놓치지 않는다.
@@ -211,6 +234,18 @@ struct TranscriptView: View {
                     inlineNotice(
                         warning,
                         systemImage: "arrow.down.circle.badge.exclamationmark",
+                        tint: .orange,
+                        pane: nil
+                    )
+                }
+
+                if let warning = recorder.languageSwitchWarning {
+                    // 언어를 바꾸지 못한 세션. 이전 언어로 계속 기록되고 있으므로 녹취는
+                    // 정상인데, 알리지 않으면 사용자는 자기가 고른 언어로 인식되고 있다고
+                    // 믿는다 — 그러면 빠진 발화의 원인을 찾을 수 없다.
+                    inlineNotice(
+                        warning,
+                        systemImage: "character.bubble.fill.ko",
                         tint: .orange,
                         pane: nil
                     )

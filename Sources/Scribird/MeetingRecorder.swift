@@ -23,6 +23,12 @@ final class MeetingRecorder {
         }
     }
 
+    /// 세션 시작의 모델 확보 단계인지. 이때는 아직 캡처가 없어 언어를 갈아 끼울 대상도 없다.
+    var isPreparingModel: Bool {
+        if case .preparingModel = state { return true }
+        return false
+    }
+
     /// 사용자에게 알릴 실패 하나.
     ///
     /// 문구와 **그것을 고칠 설정 창**을 함께 들고 다닌다. 예전에는 화면이 문구에서 "권한"·
@@ -63,13 +69,129 @@ final class MeetingRecorder {
     /// 한 번 일어나고 끝나므로 그 사실을 회의 후에 알아도 되돌릴 수 없다.
     private(set) var currentSessionDirectory: URL?
 
-    /// 회의 언어 구성. 한국어·영어·둘 다 중에서 고른다.
+    /// 지금 실제로 전사에 쓰이고 있는 회의 언어 구성.
     ///
-    /// 바뀔 때마다 저장한다 — 설정 창의 항목은 앱을 다시 켜도 유지된다.
-    var language: TranscriptionLanguage = RecordingPreferences.language() {
-        didSet {
-            guard language != oldValue else { return }
-            RecordingPreferences.save(language: language)
+    /// **사용자가 고른 값이 아니라 유효한 값이다.** 전환이 실패하면 이전 구성이 그대로
+    /// 동작하므로, 화면이 고른 값을 표시하면 어느 언어로 인식되는지가 실제와 어긋나 결과를
+    /// 해석할 수 없게 된다.
+    private(set) var language: TranscriptionLanguage = RecordingPreferences.language()
+
+    /// 언어 전환이 모델 다운로드를 기다리는 중이면 그 대상 언어. 아니면 nil이다.
+    ///
+    /// 기다리는 동안에도 전사는 이전 언어로 계속되므로, 사용자가 전환이 이미 반영됐다고
+    /// 오해하지 않게 이 값을 화면에 알린다.
+    private(set) var pendingLanguage: TranscriptionLanguage?
+
+    /// 언어를 바꾸지 못한 이유. 다음 전환 시도나 세션 시작에서 지운다.
+    private(set) var languageSwitchWarning: String?
+
+    /// 회의 언어를 고른다. 녹취 중에도 바꿀 수 있다.
+    ///
+    /// **녹취 중 전환은 세션을 끊지 않는다.** 캡처·원본 오디오·회의록·시간축이 모두
+    /// 이어지고 전사기만 바뀐다. 세 언어 구성의 최적 오디오 포맷이 모두 같으므로(실측:
+    /// `16000 Hz, 1ch, Int16, interleaved`) 캡처를 다시 열 이유가 없다.
+    ///
+    /// **모델이 미설치면 이전 언어로 전사를 계속하면서 내려받는다.** 전환이 가장 필요한
+    /// 상황이 예상하지 못한 언어를 만난 경우이고, 그럴수록 모델이 없을 가능성이 높다 —
+    /// 거부하면 이 기능이 필요한 곳에서 없는 기능이 된다.
+    func chooseLanguage(_ next: TranscriptionLanguage) async {
+        // 고른 값은 먼저 저장한다. 이번 세션에 반영하지 못해도 사용자의 선택은 남아야 한다.
+        RecordingPreferences.save(language: next)
+        languageSwitchWarning = nil
+
+        guard state == .recording else {
+            // 녹취 중이 아니면 다음 시작이 이 값을 읽는다.
+            pendingLanguage = nil
+            language = next
+            return
+        }
+        guard next != language else {
+            pendingLanguage = nil
+            return
+        }
+        await switchLanguageWhileRecording(to: next)
+    }
+
+    /// 녹취 중에 전사 언어를 갈아 끼운다.
+    ///
+    /// 순서가 규칙이다 — **모델 설치 확인 → (필요하면) 다운로드 → 전사기 교체 → 중재기 조정.**
+    /// 미설치 로케일을 살아 있는 분석기에 넣으면 그 분석기가 회복 불가능하게 죽으므로(실측:
+    /// 교체가 던진 뒤에도 모듈 목록이 오염되고, 되돌리는 교체는 성공을 반환하면서 복구하지
+    /// 못했으며, 멀쩡했던 기존 로케일의 결과 스트림까지 닫혀 진행 중 발화가 사라졌다) 확인이
+    /// 먼저여야 한다. 시도하고 되돌리는 방식은 쓸 수 없다.
+    private func switchLanguageWhileRecording(to next: TranscriptionLanguage) async {
+        let previous = language
+        do {
+            let locales = try await SpeechModelInstaller.resolveLocales(next.locales)
+
+            if await !SpeechModelInstaller.areInstalled(locales: locales) {
+                // 이전 언어로 전사를 계속하면서 내려받는다. 여기서 상태를 .preparingModel로
+                // 바꾸지 않는다 — 그 상태는 캡처가 아직 없는 시작 단계의 것이고, 녹취 중에
+                // 쓰면 화면이 트랜스크립트를 감춘다.
+                pendingLanguage = next
+                try await SpeechModelInstaller.ensureModels(
+                    for: next.locales.map(SpeechModelInstaller.transcriberModule(for:))
+                ) { _ in }
+                // 다운로드 중에 녹취가 끝났거나 사용자가 또 바꿨으면 여기서 멈춘다.
+                guard state == .recording, pendingLanguage == next else { return }
+            }
+
+            try await applyLocales(locales, for: next)
+            pendingLanguage = nil
+            language = next
+        } catch {
+            // 전환 실패는 세션을 접지 않는다. 이전 언어가 그대로 동작하고 있으므로 녹취는
+            // 계속되고, 사용자에게는 화면에 보이는 언어가 실제 동작 중인 것으로 남는다.
+            pendingLanguage = nil
+            language = previous
+            languageSwitchWarning = tr(
+                "회의 언어를 \(next.displayName)로 바꾸지 못해 \(previous.displayName)로 계속 기록합니다: \(error.localizedDescription)",
+                "Couldn't switch the meeting language to \(next.displayName), so recording continues in \(previous.displayName): \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /// 살아 있는 전사 세션들의 로케일을 바꾸고 중재기를 그 구성에 맞춘다.
+    ///
+    /// 중재기를 철거할 때는 **그것이 들고 있던 발화를 먼저 기록하고 완료를 기다린다** —
+    /// 기다리지 않으면 화면에는 보이는데 파일에는 없는 발화가 생긴다. 세션 종료·경계와 같은
+    /// 규칙이다.
+    private func applyLocales(
+        _ locales: [Locale],
+        for next: TranscriptionLanguage
+    ) async throws {
+        // 로케일이 빠지는 전환이면 **떼어내기 전에** 화면에 있는 미확정 발화를 남긴다.
+        //
+        // 전사기는 무음을 만나도 확정을 미룬다 — 실측: 발화 사이에 1.5초 무음을 넣어도 한국어
+        // 전사기가 13.14초까지 하나의 세그먼트로 뭉갠 뒤에야 확정했다. 그 상태에서 전사기를
+        // 떼어내면 그 덩어리가 확정되지 않고 사라진다. 입력이 열려 있는 동안 확정을 유도할
+        // 방법은 없다(실측: 이미 공급된 지점까지로 한정해도 마감 요청이 10.4초 동안 반환되지
+        // 않았다 — 녹취 전체가 멈춘다).
+        //
+        // 다만 그 시점의 잠정 결과에는 발화가 이미 들어 있다(실측: 제거 직전 잠정 텍스트에
+        // "안녕하세요. 오늘 회의를 시작하겠습니다."가 온전히 담겨 있었다). 그래서 확정을
+        // 기다리는 대신 화면에 보이던 것을 그대로 남긴다 — 불완전한 발화가 누락보다 낫다는
+        // 종료·경계와 같은 판단이다.
+        if !next.localeDifference(from: language).removed.isEmpty {
+            await drainPendingUtterances(into: store)
+        }
+
+        for speaker in Speaker.allCases where activeSources.contains(speaker) {
+            guard let session = sessions[speaker] else { continue }
+            try await session.setLocales(locales)
+        }
+
+        if next.needsArbitration {
+            for speaker in Speaker.allCases where activeSources.contains(speaker) {
+                guard arbiters[speaker] == nil else { continue }
+                arbiters[speaker] = LanguageArbiter { [weak self] segment in
+                    await self?.commit(segment)
+                }
+            }
+        } else {
+            // 중재기가 들고 있던 발화는 위 배출에서 이미 기록됐다(로케일이 빠지는 전환이므로
+            // 그 경로를 반드시 지난다). 남은 것은 표에서 떼어내는 일뿐이다.
+            arbiters.removeAll()
         }
     }
 
@@ -275,6 +397,11 @@ final class MeetingRecorder {
         sourceWarning = nil
         modelRetentionWarning = nil
         rootFallbackWarning = nil
+        languageSwitchWarning = nil
+        // 지난 세션이 다운로드를 기다리다 끝났을 수 있다. 이번 시작은 저장된 값을 그대로
+        // 읽으므로 기다림의 흔적을 남기지 않는다.
+        pendingLanguage = nil
+        language = RecordingPreferences.language()
         sessionTimeOffset = 0
 
         do {
@@ -948,6 +1075,8 @@ final class MeetingRecorder {
         currentSessionDirectory = nil
         sessionRoot = nil
         sessionTimeOffset = 0
+        // 기다리던 전환은 이 세션의 것이었다. 다음 세션은 저장된 값을 처음부터 쓴다.
+        pendingLanguage = nil
         if !reservedLocales.isEmpty {
             await SpeechModelInstaller.release(locales: reservedLocales)
             reservedLocales = []

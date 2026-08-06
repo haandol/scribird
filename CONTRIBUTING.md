@@ -179,6 +179,18 @@ throw an uncaught Auto Layout exception, and it leaves no crash report. The wind
 now and tabs scroll inside it, so the remaining risk is a tab that needs more height than the
 window has.
 
+**Meeting language, switched mid-recording.** Start a recording with `한국어 + English`, say a
+sentence, then narrow it to `한국어` from the transcript window's picker. Three things must hold:
+both level meters keep moving, the `.m4a` files keep growing, and — the one that actually broke —
+**the sentence you said just before the switch is in `transcript.md`.** A transcriber holds an
+utterance unfinalized far longer than you'd guess (measured: 13.14 s of speech stayed in one
+un-finalized segment even with 1.5 s of silence between sentences), so detaching it without
+draining loses everything since the last finalize, not just the current phrase. There is no way
+to force a finalize while capture is open — asking for one never returns (measured: 90 s, and
+10.4 s even when bounded to audio already fed), which would freeze the whole recording. Widening
+(`한국어` → `한국어 + English`) has no such risk, so narrowing is the direction to test. Then
+confirm the settings window's picker shows the same language as the transcript window.
+
 **Interface language.** Switch the language in settings and confirm the transcript window
 behind it redraws immediately. The strings come from a global value, so if a view forgets to
 observe the language it stays in the old one until reopened — and that gap is invisible unless

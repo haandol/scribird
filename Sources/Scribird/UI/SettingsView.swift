@@ -146,20 +146,28 @@ struct SettingsView: View {
     private var recordingTab: some View {
         Form {
             Section(tr("전사", "Transcription")) {
+                // 녹취 중에도 바꿀 수 있다. 전환은 캡처와 원본 오디오를 끊지 않고 전사기만
+                // 갈아 끼우므로, 언어가 틀렸다는 것을 회의 중에 발견해도 고칠 수 있다.
                 Picker(tr("회의 언어", "Meeting language"), selection: Binding(
-                    get: { recorder.language },
-                    set: { recorder.language = $0 }
+                    get: { recorder.pendingLanguage ?? recorder.language },
+                    set: { next in Task { await recorder.chooseLanguage(next) } }
                 )) {
                     ForEach(TranscriptionLanguage.allCases) { language in
                         Text(language.displayName).tag(language)
                     }
                 }
-                .disabled(recorder.state.isBusy)
+                // 모델 확보 중에는 캡처가 아직 없어 전환할 대상도 없다.
+                .disabled(recorder.isPreparingModel)
 
-                // 잠긴 이유를 적지 않으면 사용자는 앱이 고장 났다고 판단한다.
-                if recorder.state.isBusy {
-                    Text(tr("녹취 중에는 바꿀 수 없습니다. 이미 만들어진 전사기와 파일에 반영되지 않기 때문입니다.",
-                             "Can't be changed while recording — it wouldn't reach the transcribers and files already in use."))
+                if let pending = recorder.pendingLanguage {
+                    // 기다리는 동안 전사는 이전 언어로 계속된다 — 알리지 않으면 사용자가
+                    // 전환이 이미 반영됐다고 오해한다.
+                    Text(tr("\(pending.displayName) 모델을 내려받는 중입니다. 그동안 \(recorder.language.displayName)로 계속 기록합니다.",
+                             "Downloading the \(pending.displayName) model. Recording continues in \(recorder.language.displayName) until it's ready."))
+                        .captionStyle(.secondary)
+                } else if recorder.state == .recording {
+                    Text(tr("녹취 중에도 바꿀 수 있습니다. 소리와 회의록은 끊기지 않습니다.",
+                             "Can be changed while recording — the audio and transcript are not interrupted."))
                         .captionStyle(.secondary)
                 }
             }

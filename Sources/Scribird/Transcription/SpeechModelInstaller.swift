@@ -184,6 +184,47 @@ enum SpeechModelInstaller {
         await AssetInventory.status(forModules: modules) == .installed
     }
 
+    /// 설치 상태를 묻고 다운로드를 요청하기 위한 모듈. 결과를 받는 데는 쓰지 않는다.
+    ///
+    /// 에셋 API가 로케일이 아니라 모듈을 받으므로 필요하다. 이 인스턴스를 분석기에 물리지
+    /// 않는 것이 중요하다 — 녹취 중 전환에서는 살아 있는 세션이 자기 전사기를 따로 만든다.
+    static func transcriberModule(for locale: Locale) -> any SpeechModule {
+        SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+    }
+
+    /// 이 로케일들의 모델이 모두 설치돼 있는지.
+    ///
+    /// **녹취 중 언어 전환은 이 판정을 먼저 통과해야 한다.** 미설치 로케일을 살아 있는
+    /// 분석기에 넣으면 그 분석기가 회복 불가능하게 죽는다 — 실측: 교체가 실패를 던진 뒤에도
+    /// 모듈 목록에는 그것이 남았고("No GeneralASR asset for language ja", modules=2),
+    /// 원래 구성으로 되돌리는 교체는 성공을 반환하면서 실제로 복구하지 못했으며, 아무 문제
+    /// 없던 기존 로케일의 결과 스트림까지 같은 에러로 닫혀 진행 중이던 발화가 사라졌다.
+    /// 그러므로 시도해 보고 되돌리는 방식은 쓸 수 없고, 넣기 전에 확인하는 것만이 안전하다.
+    static func areInstalled(locales: [Locale]) async -> Bool {
+        allInstalled(
+            requested: locales,
+            installedIdentifiers: await SpeechTranscriber.installedLocales.map(\.identifier)
+        )
+    }
+
+    /// 설치 판정. 시스템 조회에서 떼어내 테스트가 실측된 목록을 그대로 넣을 수 있게 한다.
+    ///
+    /// **하나라도 미설치면 전체가 미설치다.** 설치된 쪽만 보고 교체를 진행하면 미설치 쪽이
+    /// 분석기에 들어가고, 그 실패는 되돌릴 수 없다.
+    ///
+    /// 시스템은 설치 목록을 밑줄 표기(`ko_KR`)로 돌려주고 이 앱은 붙임표 표기(`ko-KR`)로
+    /// 요청한다(실측). 구분자를 통일하지 않으면 설치된 모델을 미설치로 오판해 전환마다
+    /// 다운로드를 기다린다.
+    static func allInstalled(requested: [Locale], installedIdentifiers: [String]) -> Bool {
+        let installed = Set(installedIdentifiers.map(normalized))
+        return !requested.isEmpty
+            && requested.allSatisfy { installed.contains(normalized($0.identifier)) }
+    }
+
+    private static func normalized(_ identifier: String) -> String {
+        identifier.replacingOccurrences(of: "_", with: "-").lowercased()
+    }
+
     static func reservedLocales() async -> [Locale] {
         await AssetInventory.reservedLocales
     }

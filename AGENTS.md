@@ -104,6 +104,20 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   the monitor must read the selector from one shared source, and a test must assert they
   match — the mismatch is invisible in code review and only shows up by switching a real
   device.
+- **A meeting-language change swaps the transcribers, not the session.** All three language
+  configurations report the same optimal format (measured: `16000 Hz, 1ch, Int16, interleaved`
+  for Korean alone, English alone, and both), so a language switch never justifies reopening
+  capture — swap the analyzer's modules and leave the pump, the audio files, and the timeline
+  alone. Two rules make it safe. **Verify the models are installed before touching a live
+  analyzer**: adding an uninstalled locale throws, and the throw is unrecoverable — the module
+  list stayed polluted afterward, setting it back to the original returned success without
+  restoring anything, and the healthy locale's result stream died with the same error, taking the
+  in-flight utterance with it. **Drain the pending utterance before detaching a locale**: a
+  transcriber withholds a finalize far longer than expected (measured: 13.14 s in one
+  un-finalized segment despite 1.5 s gaps between sentences), so detaching loses everything since
+  the last finalize. You cannot force a finalize instead — the request never returns while input
+  is open (measured: 90 s, and 10.4 s even bounded to audio already fed), which freezes the
+  recording. The volatile result already holds that text, so persist what was on screen.
 - **A device change swaps the capture, not the session.** Reconnecting keeps the pump, so
   the transcript store, audio sinks, and frame-based timeline all continue. Rebuilding the
   input stream instead would send the analyzer into teardown and re-enter the
@@ -288,10 +302,15 @@ Carbon event target nor a live capture rotation exists under `swift test`:
   window stays visible. Then set a combination already taken by another app and confirm
   the footer reports the failure instead of failing silently.
 - Open settings with `⌘,`, confirm the transcript window behind it stays visible and
-  recording continues, and that the language and audio-saving rows are disabled with a
+  recording continues, and that the audio-saving and save-location rows are disabled with a
   stated reason while recording. Then click through all three tabs and confirm the app survives
   and no tab clips its last row — the crash this guards against left no crash report, so a test
   run that never switches tabs looks clean.
+- While recording, narrow the meeting language from `한국어 + English` to `한국어` in the
+  transcript window. Both meters must keep moving, the `.m4a` files must keep growing, and **the
+  sentence spoken just before the switch must appear in `transcript.md`** — that utterance is
+  normally still un-finalized, so detaching its transcriber without draining loses everything
+  since the last finalize. Confirm the settings picker shows the same language afterward.
 - Press the version check with the network off and confirm it reports a failure that
   leaves recording unaffected. With the network on, confirm it distinguishes "up to date"
   from a failure — silence for either would be indistinguishable to the user.
