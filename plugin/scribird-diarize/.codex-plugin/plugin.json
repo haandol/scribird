@@ -1,6 +1,6 @@
 {
   "name": "scribird-diarize",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Split the merged remote speaker in a Scribird meeting transcript into individual participants using Amazon Transcribe, without uploading to S3.",
   "author": {
     "name": "haandol",

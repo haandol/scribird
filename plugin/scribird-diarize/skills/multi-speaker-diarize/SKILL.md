@@ -44,6 +44,18 @@ flowchart LR
 그래서 텍스트를 AWS 것으로 갈아치우지 않는다. AWS는 화자 경계를 얻으려고 부른 것이지
 정답으로 부른 것이 아니다.
 
+## 실행 경로
+
+명령을 실행하기 전에 `SKILL_DIR`을 **이 `SKILL.md`가 들어 있는 디렉터리의 절대
+경로**로 설정한다. 스킬 로더가 제공한 source locator에서 구하며, 현재 작업
+디렉터리가 스킬 디렉터리라고 가정하지 않는다.
+
+이 스킬에 포함된 스크립트와 테스트는 항상 `"$SKILL_DIR/..."` 절대 경로로 실행한다.
+`SKILL_DIR`은 미리 존재하는 환경 변수가 아니다. 각 도구 호출에서 실제 절대 경로를
+직접 대입하거나 같은 셸 명령 안에서 설정하며, 이전 호출의 셸 환경이 남아 있다고
+가정하지 않는다. 저장소 루트나 사용자의 작업 디렉터리에서 `scripts/...`를 직접
+찾으면 안 된다.
+
 ## 판단은 스크립트가 하지 않는다
 
 스크립트는 차이를 **측정**하고, 그 차이가 문제인지는 **당신이** 판단한다. 린터가
@@ -100,7 +112,7 @@ jq -r '.locale' ~/Documents/Scribird/<세션>/transcript.jsonl | sort -u
 **스트리밍을 먼저 쓴다.** S3 버킷을 만들지도, 오디오를 저장하지도 않는다.
 
 ```bash
-/usr/bin/python3 scripts/stream_transcribe.py \
+/usr/bin/python3 "$SKILL_DIR/scripts/stream_transcribe.py" \
   --session ~/Documents/Scribird/<세션> \
   --sources remote --language-code ko-KR
 ```
@@ -136,7 +148,7 @@ jq -r '.locale' ~/Documents/Scribird/<세션>/transcript.jsonl | sort -u
 ### 4. 병합한다
 
 ```bash
-/usr/bin/python3 scripts/merge_speakers.py \
+/usr/bin/python3 "$SKILL_DIR/scripts/merge_speakers.py" \
   --session ~/Documents/Scribird/<세션> \
   --aws-remote ~/Documents/Scribird/<세션>/aws-remote.json \
   --max-speakers 5
@@ -186,7 +198,7 @@ jq -r '.locale' ~/Documents/Scribird/<세션>/transcript.jsonl | sort -u
 
 ## 참고
 
-- 테스트: `/usr/bin/python3 -m unittest discover -s tests` (112개, 네트워크 불필요)
+- 테스트: `/usr/bin/python3 -m unittest discover -s "$SKILL_DIR/tests"` (네트워크 불필요)
 - 모든 스크립트가 Python 3 표준 라이브러리만 쓴다. `/usr/bin/python3`(3.9)에서 그대로
   돈다 — WebSocket과 SigV4까지 직접 구현한 값이 이것이다
 - 자격 증명은 `awscli`에서 가져온다(`aws configure export-credentials`). 프로필·SSO·
