@@ -17,10 +17,12 @@ AWS를 호출하지 않는다. `run_aws`를 가로채 CLI에 넘어간 인자를
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -417,6 +419,44 @@ class ConsentTests(unittest.TestCase):
         self.assertIsNone(recorder.find("s3", "cp"))
         self.assertIsNone(recorder.find("transcribe", "start-transcription-job"))
 
+    def test_plan_discloses_aws_permissions_and_temporary_s3_storage(self) -> None:
+        recorder = Recorder()
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self.build_session(tmp)
+            with mock.patch.object(rt, "run_aws", recorder), mock.patch.object(
+                rt, "resolve_context", return_value=CONTEXT
+            ), redirect_stderr(stderr):
+                code = rt.main(["--session", str(session), "--sources", "remote"])
+
+        self.assertEqual(code, 3)
+        plan = stderr.getvalue()
+        self.assertIn("s3:CreateBucket", plan)
+        self.assertIn("s3:PutBucketPublicAccessBlock", plan)
+        self.assertIn("transcribe:StartTranscriptionJob", plan)
+        self.assertIn("S3 버킷에 임시 저장", plan)
+        self.assertIn("remote.m4a", plan)
+        self.assertIn("소스: remote", plan)
+        self.assertIn(CONTEXT.account, plan)
+        self.assertIn(CONTEXT.region, plan)
+        self.assertIn(rt.default_bucket_name(CONTEXT), plan)
+        self.assertIn("작업 후 S3 객체: 삭제합니다", plan)
+
+    def test_default_source_is_remote_only(self) -> None:
+        recorder = Recorder()
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self.build_session(tmp)
+            with mock.patch.object(rt, "run_aws", recorder), mock.patch.object(
+                rt, "resolve_context", return_value=CONTEXT
+            ), redirect_stderr(stderr):
+                code = rt.main(["--session", str(session)])
+
+        self.assertEqual(code, 3)
+        plan = stderr.getvalue()
+        self.assertIn("소스: remote", plan)
+        self.assertNotIn("me.m4a", plan)
+
     def test_missing_audio_fails_before_any_aws_call(self) -> None:
         """파일이 없으면 자격 증명을 확인하기도 전에 멈춘다."""
         recorder = Recorder()
@@ -538,6 +578,55 @@ class FullRunTests(unittest.TestCase):
                     ]
                 )
         self.assertIsNone(recorder.find("s3api", "delete-object"))
+
+    def test_cleanup_failure_keeps_downloaded_result_and_reports_leftover(self) -> None:
+        responses = {
+            "transcribe get-transcription-job": {
+                "TranscriptionJob": {
+                    "TranscriptionJobStatus": "COMPLETED",
+                    "Transcript": {"TranscriptFileUri": "s3://b/out.json"},
+                }
+            },
+            "s3api list-objects-v2": {
+                "Contents": [{"Key": "s/x/remote.m4a"}]
+            },
+        }
+        recorder = Recorder(responses)
+        recorder.failures.add("s3api delete-object")
+        stdout = io.StringIO()
+
+        def download(job: dict, destination: Path, context: rt.AwsContext) -> Path:
+            destination.write_text("transcript", encoding="utf-8")
+            return destination
+
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "s"
+            session.mkdir(parents=True)
+            (session / "remote.m4a").write_bytes(b"\x00" * 512)
+            with mock.patch.object(rt, "run_aws", recorder), mock.patch.object(
+                rt, "resolve_context", return_value=CONTEXT
+            ), mock.patch.object(rt, "download_transcript", side_effect=download), mock.patch(
+                "sys.stdout", stdout
+            ):
+                code = rt.main(
+                    [
+                        "--session",
+                        str(session),
+                        "--yes",
+                        "--quiet",
+                        "--stamp",
+                        "x",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                (session / "aws-remote.json").read_text(encoding="utf-8"),
+                "transcript",
+            )
+            self.assertIn("aws-remote.json", stdout.getvalue())
+            self.assertIn("s3://", stdout.getvalue())
+            self.assertIn("remote.m4a", stdout.getvalue())
 
 
 class RegionTests(unittest.TestCase):

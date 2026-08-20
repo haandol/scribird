@@ -36,6 +36,19 @@ POLL_INTERVAL_SECONDS = 5
 # 기본 대기 한도. 1시간 회의가 대략 10분 안에 끝나는 것을 기준으로 여유를 뒀다.
 DEFAULT_TIMEOUT_SECONDS = 1800
 
+# 기본 경로가 요구하는 AWS 권한. 기존 버킷을 쓰면 생성 관련 권한은 호출하지 않지만,
+# 버킷이 없는 사용자도 실행할 수 있어야 하므로 승인 화면에는 전체 조건을 보여준다.
+REQUIRED_PERMISSIONS = (
+    "s3:CreateBucket",
+    "s3:PutBucketPublicAccessBlock",
+    "s3:PutObject",
+    "s3:GetObject",
+    "s3:DeleteObject",
+    "s3:ListBucket",
+    "transcribe:StartTranscriptionJob",
+    "transcribe:GetTranscriptionJob",
+)
+
 # 작업 이름에 쓸 수 없는 문자. Transcribe는 [0-9a-zA-Z._-]만 받는다.
 _UNSAFE_JOB_CHARS = re.compile(r"[^0-9a-zA-Z._-]")
 
@@ -427,12 +440,17 @@ def print_upload_plan(
         file=sys.stderr,
     )
     print(f"  합계 {total_mb:.1f} MB", file=sys.stderr)
+    print(f"  필요 권한: {', '.join(REQUIRED_PERMISSIONS)}", file=sys.stderr)
+    print(
+        "  회의 오디오는 위 S3 버킷에 임시 저장되고 AWS Transcribe 배치 작업이 읽습니다.",
+        file=sys.stderr,
+    )
     print(f"  작업 후 S3 객체: {'남겨둡니다' if keep_s3 else '삭제합니다'}", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Scribird 세션 오디오를 AWS Transcribe로 화자 분리한다."
+        description="Scribird 세션 오디오를 S3와 AWS Transcribe 배치 작업으로 화자 분리한다."
     )
     parser.add_argument("--session", required=True, type=Path, help="세션 디렉터리")
     parser.add_argument(

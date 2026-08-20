@@ -1,8 +1,8 @@
 {
   "name": "scribird-diarize",
   "displayName": "Scribird Diarize",
-  "version": "0.1.1",
-  "description": "Scribird 회의 녹음을 AWS Transcribe로 다중 화자 분리하고, 온디바이스 전사와 대조해 `Remote`를 `Remote A/B/C`로 세분화한다. 로컬 AWS 자격 증명을 그대로 쓰고 작업 후 S3를 정리한다.",
+  "version": "0.2.0",
+  "description": "Scribird 회의 녹음을 승인 후 S3에 업로드하고 AWS Transcribe 배치 작업으로 다중 화자 분리한다. 온디바이스 전사와 대조해 `Remote`를 실제 참석자 이름 또는 `Unknown N`으로 세분화하고 작업 후 S3 객체를 정리한다.",
   "author": {
     "name": "haandol"
   },

@@ -1,7 +1,7 @@
 {
   "name": "scribird-diarize",
-  "version": "0.1.1",
-  "description": "Split the merged remote speaker in a Scribird meeting transcript into individual participants using Amazon Transcribe, without uploading to S3.",
+  "version": "0.2.0+codex.20260820101701",
+  "description": "Split the merged remote speaker into verified participant names or Unknown N using an approved S3 batch job.",
   "author": {
     "name": "haandol",
     "url": "https://github.com/haandol"
@@ -20,17 +20,22 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Scribird Diarize",
-    "shortDescription": "Split one merged remote speaker into individual participants",
-    "longDescription": "Scribird labels your microphone as me and system output as remote, which is exact but caps speaker separation at two. Meeting apps mix participants down before the audio is captured, so remote is one label for everyone on the far side. This plugin sends the saved remote audio to Amazon Transcribe for speaker partitioning, streaming it over a WebSocket so nothing is stored in S3, then overlays only the speaker boundaries onto the on-device transcript. The transcript text is never replaced — where the two engines heard a word differently, the difference is reported for you to judge.",
+    "shortDescription": "Match diarized speakers to participant names",
+    "longDescription": "Scribird labels your microphone as me and system output as remote, which is exact but caps speaker separation at two. Meeting apps mix participants down before capture, so remote is one label for everyone on the far side. The plugin asks for known participant names and keeps them local, then shows the required AWS credentials and S3 permissions before requesting upload approval. It runs an Amazon Transcribe batch speaker-partitioning job, applies only evidence-backed or user-confirmed names, uses Unknown N for unresolved speakers, retrieves the result, and removes the job objects by default. The transcript text is never replaced.",
     "developerName": "haandol",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Read", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
     "websiteURL": "https://github.com/haandol/scribird/tree/main/plugin/scribird-diarize",
     "defaultPrompt": [
       "Split the remote speaker in my latest Scribird session into individual participants.",
       "Diarize the meeting audio in ~/Documents/Scribird and update the transcript.",
       "Compare my on-device transcript against Amazon Transcribe and show me the differences.",
-      "How many people spoke in this recording?"
+      "How many people spoke in this recording?",
+      "Match the speakers in my latest Scribird meeting to these participant names."
     ],
     "brandColor": "#0F766E",
     "screenshots": []

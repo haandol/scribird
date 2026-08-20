@@ -4,7 +4,8 @@
 Scribird의 `transcript.jsonl`은 화자가 `me`/`remote` 두 개다. 오디오 경로가
 화자를 확정하므로 이 2분리는 틀릴 수 없지만, `remote`는 회의 앱이 참석자를
 믹스다운한 뒤의 스트림이라 여러 명이 한 라벨에 뭉쳐 있다. AWS Transcribe의
-speaker partitioning으로 그 안의 화자 경계를 얻어 `Remote A/B/...`로 쪼갠다.
+speaker partitioning으로 그 안의 화자 경계를 얻어 실제 이름 또는
+`Unknown 1/2/...`로 쪼갠다.
 
 원본 `transcript.jsonl`은 절대 수정하지 않는다 — 이 스크립트의 판정은 확률적
 추정이고, 원본은 오디오 경로가 보장한 사실이다. 사실을 추정으로 덮어쓰면
@@ -173,6 +174,162 @@ class AwsResult:
     segments: list[AwsSpeakerSegment]
     words: list[AwsWord]
     languages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Participant:
+    name: str
+    hints: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NameEvidence:
+    start: float
+    text: str
+
+
+@dataclass(frozen=True)
+class SpeakerNameMatch:
+    name: str
+    status: str
+    method: str
+    evidence: tuple[NameEvidence, ...]
+
+
+@dataclass
+class SpeakerNamePlan:
+    participants: dict[str, list[Participant]] = field(default_factory=dict)
+    matches: dict[str, dict[str, SpeakerNameMatch]] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+
+def load_speaker_name_plan(path: Path) -> SpeakerNamePlan:
+    """유효한 이름 매칭만 읽고, 나머지는 경고로 남긴다."""
+    plan = SpeakerNamePlan()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        plan.warnings.append(f"{path}을 읽을 수 없어 모든 화자를 익명으로 표시합니다: {error}")
+        return plan
+
+    if not isinstance(raw, dict):
+        plan.warnings.append(f"{path}의 최상위 값이 객체가 아니어서 이름 매칭을 건너뜁니다.")
+        return plan
+
+    allowed_sources = {"me", "remote"}
+    participants_raw = raw.get("participants", {})
+    matches_raw = raw.get("matches", {})
+    if not isinstance(participants_raw, dict):
+        plan.warnings.append("participants가 객체가 아니어서 참석자 목록을 건너뜁니다.")
+        participants_raw = {}
+    if not isinstance(matches_raw, dict):
+        plan.warnings.append("matches가 객체가 아니어서 이름 매칭을 건너뜁니다.")
+        matches_raw = {}
+
+    participants: dict[str, list[Participant]] = {}
+    for source, entries in participants_raw.items():
+        if source not in allowed_sources or not isinstance(entries, list):
+            plan.warnings.append(f"참석자 소스 {source!r}를 읽을 수 없어 건너뜁니다.")
+            continue
+        parsed: list[Participant] = []
+        seen_names: set[str] = set()
+        for index, entry in enumerate(entries, start=1):
+            if isinstance(entry, str):
+                name = entry.strip()
+                hints: tuple[str, ...] = ()
+            elif isinstance(entry, dict):
+                name = str(entry.get("name", "")).strip()
+                raw_hints = entry.get("hints", [])
+                if not isinstance(raw_hints, list) or not all(
+                    isinstance(hint, str) and hint.strip() for hint in raw_hints
+                ):
+                    plan.warnings.append(
+                        f"{source} 참석자 {index}의 hints가 잘못돼 힌트 없이 사용합니다."
+                    )
+                    raw_hints = []
+                hints = tuple(hint.strip() for hint in raw_hints)
+            else:
+                plan.warnings.append(f"{source} 참석자 {index}의 형식이 잘못돼 건너뜁니다.")
+                continue
+            if not name:
+                plan.warnings.append(f"{source} 참석자 {index}의 이름이 비어 있어 건너뜁니다.")
+                continue
+            folded = name.casefold()
+            if folded in seen_names:
+                plan.warnings.append(f"{source} 참석자 이름 {name!r}이 중복돼 한 번만 사용합니다.")
+                continue
+            seen_names.add(folded)
+            parsed.append(Participant(name=name, hints=hints))
+        participants[source] = parsed
+
+    matches: dict[str, dict[str, SpeakerNameMatch]] = {}
+    for source, by_label in matches_raw.items():
+        if source not in allowed_sources or not isinstance(by_label, dict):
+            plan.warnings.append(f"이름 매칭 소스 {source!r}를 읽을 수 없어 건너뜁니다.")
+            continue
+        known_names = {participant.name.casefold() for participant in participants.get(source, [])}
+        parsed_matches: dict[str, SpeakerNameMatch] = {}
+        verified_names: set[str] = set()
+        for label, entry in sorted(by_label.items()):
+            if not isinstance(label, str) or not label.startswith("spk_") or not isinstance(entry, dict):
+                plan.warnings.append(f"{source}의 이름 매칭 {label!r} 형식이 잘못돼 건너뜁니다.")
+                continue
+            name = str(entry.get("name", "")).strip()
+            status = str(entry.get("status", "")).strip()
+            method = str(entry.get("method", "")).strip()
+            evidence_raw = entry.get("evidence", [])
+            if not name:
+                plan.warnings.append(f"{source}/{label}의 이름이 비어 있어 건너뜁니다.")
+                continue
+            if known_names and name.casefold() not in known_names:
+                plan.warnings.append(
+                    f"{source}/{label}의 이름 {name!r}이 참석자 목록에 없어 건너뜁니다."
+                )
+                continue
+            if status not in {"verified", "candidate"}:
+                plan.warnings.append(f"{source}/{label}의 status가 잘못돼 건너뜁니다.")
+                continue
+            if not method:
+                plan.warnings.append(f"{source}/{label}의 근거 방식이 없어 건너뜁니다.")
+                continue
+            if not isinstance(evidence_raw, list) or not evidence_raw:
+                plan.warnings.append(f"{source}/{label}의 근거 발화가 없어 건너뜁니다.")
+                continue
+
+            evidence: list[NameEvidence] = []
+            for item in evidence_raw:
+                if not isinstance(item, dict):
+                    plan.warnings.append(f"{source}/{label}의 잘못된 근거 항목을 건너뜁니다.")
+                    continue
+                start = item.get("start")
+                text = str(item.get("text", "")).strip()
+                if not isinstance(start, (int, float)) or start < 0 or not text:
+                    plan.warnings.append(f"{source}/{label}의 잘못된 근거 시각/문장을 건너뜁니다.")
+                    continue
+                evidence.append(NameEvidence(start=float(start), text=text))
+            if not evidence:
+                plan.warnings.append(f"{source}/{label}에 사용할 수 있는 근거가 없어 건너뜁니다.")
+                continue
+
+            folded = name.casefold()
+            if status == "verified" and folded in verified_names:
+                plan.warnings.append(
+                    f"{source}에서 검증된 이름 {name!r}이 중복돼 {label}에는 적용하지 않습니다."
+                )
+                continue
+            if status == "verified":
+                verified_names.add(folded)
+            parsed_matches[label] = SpeakerNameMatch(
+                name=name,
+                status=status,
+                method=method,
+                evidence=tuple(evidence),
+            )
+        matches[source] = parsed_matches
+
+    plan.participants = participants
+    plan.matches = matches
+    return plan
 
 
 def load_local_segments(path: Path) -> list[LocalSegment]:
@@ -359,42 +516,35 @@ def assign_speakers(
             segment.overlap_ratio = ratio
 
 
-def name_speakers(source: str, local: list[LocalSegment]) -> dict[str, str]:
-    """AWS의 `spk_0`을 사람이 읽는 이름으로 바꾼다.
+def name_speakers(
+    source: str,
+    local: list[LocalSegment],
+    speaker_name_plan: SpeakerNamePlan | None = None,
+) -> dict[str, str]:
+    """감지 화자에 익명 이름을 주고 검증된 실제 이름만 적용한다."""
+    observed = sorted(
+        {segment.aws_label for segment in local if segment.aws_label is not None},
+        key=_speaker_label_sort_key,
+    )
+    names = {label: f"Unknown {index}" for index, label in enumerate(observed, start=1)}
 
-    `spk_N`의 번호는 등장 순서일 뿐 의미가 없어서, 그대로 회의록에 쓰면 읽는
-    사람이 매번 누구인지 되짚어야 한다.
-
-    소스에 따라 이름 규칙이 다른 이유는 두 소스의 성질이 다르기 때문이다.
-
-    - `remote`: 시스템 출력이므로 전원이 원격 참석자다. 발화량이 많은 순서로
-      `Remote A`, `Remote B`를 준다. 회의에서는 보통 주 발언자가 먼저 눈에
-      들어와야 한다.
-    - `me`: 마이크 입력이므로 이 기기 사용자가 주인이다. 발화량이 가장 많은
-      화자를 `Me`로 두고, 남는 화자는 `In-person B`로 부른다. 이는
-      "상대방이 내 마이크로 함께 들어오는 대면 회의"에서만 생기는 경우이고,
-      그때도 기기 주인이 최대 발화자라는 전제에 기댄다. 전제가 깨지는
-      배치(내가 거의 듣고만 있는 회의)에서는 라벨이 뒤집히므로, 리포트에
-      화자별 발화량을 함께 적어 사람이 검증할 수 있게 한다.
-    """
-    duration_by_label: dict[str, float] = {}
-    for segment in local:
-        if segment.aws_label is None:
-            continue
-        duration_by_label[segment.aws_label] = (
-            duration_by_label.get(segment.aws_label, 0.0) + segment.duration
-        )
-
-    ordered = sorted(duration_by_label.items(), key=lambda item: (-item[1], item[0]))
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    names: dict[str, str] = {}
-
-    for index, (label, _) in enumerate(ordered):
-        if source == "me":
-            names[label] = "Me" if index == 0 else f"In-person {alphabet[index % 26]}"
-        else:
-            names[label] = f"Remote {alphabet[index % 26]}"
+    if speaker_name_plan:
+        for label, match in speaker_name_plan.matches.get(source, {}).items():
+            if label not in observed:
+                speaker_name_plan.warnings.append(
+                    f"{source}에서 감지되지 않은 화자 {label}의 이름 매칭을 건너뜁니다."
+                )
+                continue
+            if match.status == "verified":
+                names[label] = match.name
     return names
+
+
+def _speaker_label_sort_key(label: str) -> tuple[int, int | str]:
+    match = re.fullmatch(r"spk_(\d+)", label)
+    if match:
+        return (0, int(match.group(1)))
+    return (1, label)
 
 
 # ── 텍스트 대조 ──────────────────────────────────────────────────────────────
@@ -543,7 +693,12 @@ def display_name(segment: LocalSegment, names: dict[str, dict[str, str]]) -> str
     return names.get(segment.speaker, {}).get(segment.aws_label, fallback)
 
 
-def write_jsonl(path: Path, local: list[LocalSegment], names: dict[str, dict[str, str]]) -> None:
+def write_jsonl(
+    path: Path,
+    local: list[LocalSegment],
+    names: dict[str, dict[str, str]],
+    speaker_name_plan: SpeakerNamePlan | None = None,
+) -> None:
     """재라벨된 세그먼트를 JSONL로 쓴다.
 
     원본 필드를 모두 남기고 판정 결과를 덧붙인다. `source`에 원래의
@@ -552,11 +707,18 @@ def write_jsonl(path: Path, local: list[LocalSegment], names: dict[str, dict[str
     """
     with path.open("w", encoding="utf-8") as handle:
         for segment in local:
+            name_match = (
+                speaker_name_plan.matches.get(segment.speaker, {}).get(segment.aws_label)
+                if speaker_name_plan and segment.aws_label
+                else None
+            )
             record = {
                 "id": segment.id,
                 "source": segment.speaker,
                 "speaker": display_name(segment, names),
                 "aws_label": segment.aws_label,
+                "speaker_name_status": name_match.status if name_match else None,
+                "speaker_name_method": name_match.method if name_match else None,
                 "overlap_ratio": round(segment.overlap_ratio, 3),
                 "start": segment.start,
                 "end": segment.end,
@@ -663,8 +825,8 @@ def _render_source_section(
 ) -> list[str]:
     """소스 하나의 배정 결과.
 
-    화자별 발화량을 굳이 적는 이유는 이름 규칙이 발화량 순서에 기대기 때문이다.
-    읽는 쪽이 이 표를 보고 A와 B가 뒤집혔는지 바로 판단할 수 있어야 한다.
+    화자별 발화량은 분리 결과의 편향과 누락을 검토할 관측값이다. 실제 이름을
+    정하는 근거로는 사용하지 않는다.
     """
     assigned = [s for s in segments if s.aws_label is not None]
     label = SOURCE_LABELS.get(source, source)
@@ -809,6 +971,7 @@ def render_report(
     local: list[LocalSegment],
     per_source: dict[str, tuple[AwsResult, float]],
     names: dict[str, dict[str, str]],
+    speaker_name_plan: SpeakerNamePlan | None = None,
 ) -> str:
     """검증용 리포트. 소스별 배정 → 정렬 의심 → 단어 차이 순서로 담는다.
 
@@ -816,6 +979,8 @@ def render_report(
     없고, 화자 배정이 엉망이면 어느 화자의 말인지부터 다시 봐야 한다.
     """
     lines = ["# 화자 세분화 리포트", ""]
+    if speaker_name_plan:
+        lines += _render_name_matches(per_source, names, speaker_name_plan)
     for source, (aws, offset) in sorted(per_source.items()):
         lines += _render_source_section(
             source, aws, offset, [s for s in local if s.speaker == source], names
@@ -823,6 +988,71 @@ def render_report(
     lines += _render_alignment_suspects(local, names)
     lines += _render_word_diffs(local, names)
     return "\n".join(lines)
+
+
+def _render_name_matches(
+    per_source: dict[str, tuple[AwsResult, float]],
+    names: dict[str, dict[str, str]],
+    speaker_name_plan: SpeakerNamePlan,
+) -> list[str]:
+    """실제 이름을 적용한 근거와 적용하지 않은 후보를 함께 보여준다."""
+    lines = ["## 화자 이름 매칭", ""]
+    if speaker_name_plan.warnings:
+        lines.append("### 경고")
+        lines.append("")
+        for warning in dict.fromkeys(speaker_name_plan.warnings):
+            lines.append(f"- {warning}")
+        lines.append("")
+
+    for source in sorted(per_source):
+        participants = speaker_name_plan.participants.get(source, [])
+        aws = per_source[source][0]
+        lines.append(f"### {source}")
+        lines.append("")
+        if source in speaker_name_plan.participants:
+            lines.append(f"- 제공받은 참석자 수: **{len(participants)}**")
+        else:
+            lines.append("- 제공받은 참석자 수: **정보 없음**")
+        lines.append(f"- AWS가 감지한 화자 수: **{aws.speaker_count}**")
+        if source in speaker_name_plan.participants and len(participants) != aws.speaker_count:
+            lines.append(
+                "- **인원 불일치**: 목록에 없거나 감지되지 않은 사람을 임의로 합치지 않습니다."
+            )
+        lines.append("")
+        lines.append("| AWS 라벨 | 최종 표시 | 상태 | 근거 방식 |")
+        lines.append("|---|---|---|---|")
+        by_label = speaker_name_plan.matches.get(source, {})
+        observed = sorted({segment.label for segment in aws.segments})
+        for label in observed:
+            match = by_label.get(label)
+            final_name = names.get(source, {}).get(label, label)
+            if match:
+                applied = match.status == "verified" and final_name == match.name
+                status = "적용" if applied else f"후보: {match.name}"
+                method = match.method.replace("|", "\\|")
+            else:
+                status = "Unknown 유지"
+                method = "-"
+            escaped_name = final_name.replace("|", "\\|")
+            lines.append(
+                f"| {label} | {escaped_name} | {status} | {method} |"
+            )
+        lines.append("")
+
+        for label, match in sorted(by_label.items()):
+            if label not in observed:
+                continue
+            lines.append(
+                f"- `{label}` → **{match.name}** "
+                f"({'적용' if match.status == 'verified' else '후보'})"
+            )
+            for evidence in match.evidence:
+                text = evidence.text.replace("\n", " ").strip()
+                lines.append(
+                    f"  - `{format_timecode(evidence.start)}` {text}"
+                )
+        lines.append("")
+    return lines
 
 
 # ── 엔트리 포인트 ────────────────────────────────────────────────────────────
@@ -835,6 +1065,7 @@ def merge(
     offsets: dict[str, float] | None = None,
     auto_offset: bool = True,
     max_speakers_hint: int | None = None,
+    speaker_name_plan: SpeakerNamePlan | None = None,
 ) -> dict[str, object]:
     """세션 하나를 병합한다.
 
@@ -873,20 +1104,27 @@ def merge(
 
         assign_speakers(subset, aws, offset)
         annotate_text_comparison(subset, aws, offset)
-        names[source] = name_speakers(source, subset)
+        names[source] = name_speakers(source, subset, speaker_name_plan)
         per_source[source] = (aws, offset)
+
+    if speaker_name_plan:
+        for warning in dict.fromkeys(speaker_name_plan.warnings):
+            print(f"경고: 이름 매칭: {warning}", file=sys.stderr)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     jsonl_out = out_dir / "transcript.speakers.jsonl"
     md_out = out_dir / "transcript.speakers.md"
     report_out = out_dir / "diarization-report.md"
 
-    write_jsonl(jsonl_out, local, names)
+    write_jsonl(jsonl_out, local, names, speaker_name_plan)
     md_out.write_text(
         render_markdown(local, names, f"회의록 (화자 세분화) — {session.name}"),
         encoding="utf-8",
     )
-    report_out.write_text(render_report(local, per_source, names), encoding="utf-8")
+    report_out.write_text(
+        render_report(local, per_source, names, speaker_name_plan),
+        encoding="utf-8",
+    )
 
     return build_summary(
         session=session,
@@ -895,6 +1133,7 @@ def merge(
         names=names,
         outputs=[jsonl_out, md_out, report_out],
         max_speakers_hint=max_speakers_hint,
+        speaker_name_plan=speaker_name_plan,
     )
 
 
@@ -905,6 +1144,7 @@ def build_summary(
     names: dict[str, dict[str, str]],
     outputs: list[Path],
     max_speakers_hint: int | None = None,
+    speaker_name_plan: SpeakerNamePlan | None = None,
 ) -> dict[str, object]:
     """호출한 쪽이 보고할 숫자들.
 
@@ -916,12 +1156,39 @@ def build_summary(
     sources: dict[str, object] = {}
     for source, (aws, offset) in per_source.items():
         subset = [s for s in local if s.speaker == source]
+        participants = (
+            speaker_name_plan.participants.get(source, []) if speaker_name_plan else []
+        )
+        matches = speaker_name_plan.matches.get(source, {}) if speaker_name_plan else {}
+        observed_labels = set(names.get(source, {}))
         sources[source] = {
             "aws_speakers": aws.speaker_count,
             "assigned": sum(1 for s in subset if s.aws_label is not None),
             "total": len(subset),
             "offset": round(offset, 3),
             "names": names.get(source, {}),
+            "expected_participants": (
+                len(participants)
+                if speaker_name_plan and source in speaker_name_plan.participants
+                else None
+            ),
+            "participant_count_mismatch": bool(
+                speaker_name_plan
+                and source in speaker_name_plan.participants
+                and len(participants) != aws.speaker_count
+            ),
+            "verified_names": {
+                label: match.name
+                for label, match in matches.items()
+                if match.status == "verified"
+                and label in observed_labels
+                and names[source][label] == match.name
+            },
+            "name_candidates": {
+                label: match.name
+                for label, match in matches.items()
+                if match.status == "candidate" and label in observed_labels
+            },
         }
         # 상한에 걸렸다면 참석자가 더 있는데 잘렸을 수 있다. 조용히 넘기면
         # 사용자는 감지된 수가 실제 수라고 믿는다.
@@ -929,6 +1196,17 @@ def build_summary(
             print(
                 f"참고: {source}의 감지 화자 수({aws.speaker_count})가 요청 상한"
                 f"({max_speakers_hint})과 같습니다. 참석자가 더 있었다면 상한을 올려 다시 돌리세요.",
+                file=sys.stderr,
+            )
+        if (
+            speaker_name_plan
+            and source in speaker_name_plan.participants
+            and len(participants) != aws.speaker_count
+        ):
+            print(
+                f"참고: {source} 참석자 목록은 {len(participants)}명인데 "
+                f"AWS는 {aws.speaker_count}명을 감지했습니다. "
+                "남는 사람이나 화자를 임의로 합치지 않습니다.",
                 file=sys.stderr,
             )
 
@@ -939,6 +1217,9 @@ def build_summary(
         "word_diffs": sum(len(s.word_diffs) for s in local),
         "spacing_only_diffs": sum(1 for s in local for d in s.word_diffs if d.spacing_only),
         "alignment_suspects": sum(1 for s in local if s.alignment_suspect),
+        "name_warnings": (
+            list(dict.fromkeys(speaker_name_plan.warnings)) if speaker_name_plan else []
+        ),
         "sources": sources,
     }
 
@@ -958,6 +1239,13 @@ def print_summary(summary: dict[str, object]) -> None:
         )
         for label, name in info["names"].items():  # type: ignore[union-attr]
             print(f"    {label} → {name}")
+        for label, name in info["name_candidates"].items():  # type: ignore[union-attr]
+            print(f"    후보 {label} → {name} (확인 전, Unknown 유지)")
+        if info["participant_count_mismatch"]:
+            print(
+                f"    참석자 목록 {info['expected_participants']}명 / "
+                f"감지 {info['aws_speakers']}명 — 인원 불일치"
+            )
 
     diffs: int = summary["word_diffs"]  # type: ignore[assignment]
     spacing: int = summary["spacing_only_diffs"]  # type: ignore[assignment]
@@ -999,6 +1287,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-speakers", type=int, help="Transcribe에 요청한 화자 상한 (상한 도달 경고용)"
     )
+    parser.add_argument(
+        "--speaker-names",
+        type=Path,
+        help="로컬 참석자 목록과 근거 기반 이름 매칭 JSON",
+    )
     parser.add_argument("--json", action="store_true", help="요약을 JSON으로 출력")
     args = parser.parse_args(argv)
 
@@ -1017,6 +1310,9 @@ def main(argv: list[str] | None = None) -> int:
         offsets["me"] = args.offset_me
 
     try:
+        speaker_name_plan = (
+            load_speaker_name_plan(args.speaker_names) if args.speaker_names else None
+        )
         summary = merge(
             session=args.session,
             aws_paths=aws_paths,
@@ -1024,6 +1320,7 @@ def main(argv: list[str] | None = None) -> int:
             offsets=offsets,
             auto_offset=not args.no_auto_offset,
             max_speakers_hint=args.max_speakers,
+            speaker_name_plan=speaker_name_plan,
         )
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as error:
         print(f"오류: {error}", file=sys.stderr)

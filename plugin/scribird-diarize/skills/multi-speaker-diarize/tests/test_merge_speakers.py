@@ -39,6 +39,7 @@ from merge_speakers import (  # noqa: E402
     find_word_diffs,
     load_aws_result,
     load_local_segments,
+    load_speaker_name_plan,
     merge,
     name_speakers,
     normalize_text,
@@ -188,24 +189,20 @@ class OffsetTests(unittest.TestCase):
 
 
 class SpeakerNamingTests(unittest.TestCase):
-    def test_remote_speakers_named_by_talk_time(self) -> None:
-        """발화량이 많은 쪽이 A다. 회의록은 주 발언자가 먼저 보여야 한다."""
+    def test_unmatched_speakers_get_unknown_names_by_aws_label(self) -> None:
+        """발화량이 신원 근거가 아니므로 익명 번호만 안정적으로 부여한다."""
         local = [
-            segment(0.0, 2.0),  # spk_1 → 2초
-            segment(2.0, 12.0),  # spk_0 → 10초
+            segment(0.0, 20.0),
+            segment(20.0, 21.0),
         ]
-        local[0].aws_label = "spk_1"
-        local[1].aws_label = "spk_0"
+        local[0].aws_label = "spk_10"
+        local[1].aws_label = "spk_2"
         names = name_speakers("remote", local)
-        self.assertEqual(names["spk_0"], "Remote A")
-        self.assertEqual(names["spk_1"], "Remote B")
+        self.assertEqual(names["spk_2"], "Unknown 1")
+        self.assertEqual(names["spk_10"], "Unknown 2")
 
-    def test_me_source_names_dominant_speaker_as_me(self) -> None:
-        """마이크에서는 최대 발화자가 기기 주인이다.
-
-        대면 회의에서 상대방이 내 마이크로 함께 들어오는 경우(ADR에 기록된
-        Risk)를 다룬다. `나`가 사라지면 회의록의 화자 체계가 무너진다.
-        """
+    def test_processed_me_source_does_not_guess_the_device_owner(self) -> None:
+        """대면 회의에서도 최대 발화자를 기기 사용자라고 추정하지 않는다."""
         local = [
             segment(0.0, 9.0, speaker="me"),
             segment(9.0, 11.0, speaker="me"),
@@ -213,22 +210,126 @@ class SpeakerNamingTests(unittest.TestCase):
         local[0].aws_label = "spk_0"
         local[1].aws_label = "spk_1"
         names = name_speakers("me", local)
-        self.assertEqual(names["spk_0"], "Me")
-        self.assertEqual(names["spk_1"], "In-person B")
+        self.assertEqual(names["spk_0"], "Unknown 1")
+        self.assertEqual(names["spk_1"], "Unknown 2")
 
     def test_unassigned_segments_do_not_get_names(self) -> None:
         local = [segment(0.0, 5.0)]
         names = name_speakers("remote", local)
         self.assertEqual(names, {})
 
-    def test_tie_is_broken_deterministically(self) -> None:
-        # 발화량이 같으면 라벨 이름순으로 정한다. 실행마다 A/B가 뒤집히면
-        # 같은 입력에 다른 회의록이 나온다.
+    def test_unknown_numbering_is_deterministic(self) -> None:
         local = [segment(0.0, 5.0), segment(5.0, 10.0)]
         local[0].aws_label = "spk_1"
         local[1].aws_label = "spk_0"
         names = name_speakers("remote", local)
-        self.assertEqual(names["spk_0"], "Remote A")
+        self.assertEqual(names, {"spk_0": "Unknown 1", "spk_1": "Unknown 2"})
+
+    def test_verified_name_is_applied_but_candidate_stays_unknown(self) -> None:
+        local = [segment(0.0, 5.0), segment(5.0, 10.0)]
+        local[0].aws_label = "spk_0"
+        local[1].aws_label = "spk_1"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "speaker-names.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "participants": {"remote": ["Alice", "Bob"]},
+                        "matches": {
+                            "remote": {
+                                "spk_0": {
+                                    "name": "Alice",
+                                    "status": "verified",
+                                    "method": "self-identification",
+                                    "evidence": [{"start": 1.0, "text": "I'm Alice"}],
+                                },
+                                "spk_1": {
+                                    "name": "Bob",
+                                    "status": "candidate",
+                                    "method": "conversation-context",
+                                    "evidence": [{"start": 6.0, "text": "I own the API"}],
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan = load_speaker_name_plan(path)
+
+        names = name_speakers("remote", local, plan)
+        self.assertEqual(names["spk_0"], "Alice")
+        self.assertEqual(names["spk_1"], "Unknown 2")
+
+    def test_duplicate_verified_name_warns_and_keeps_one_unknown(self) -> None:
+        local = [segment(0.0, 5.0), segment(5.0, 10.0)]
+        local[0].aws_label = "spk_0"
+        local[1].aws_label = "spk_1"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "speaker-names.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "participants": {"remote": ["Alice"]},
+                        "matches": {
+                            "remote": {
+                                label: {
+                                    "name": "Alice",
+                                    "status": "verified",
+                                    "method": "user-confirmed",
+                                    "evidence": [{"start": index, "text": "confirmed"}],
+                                }
+                                for index, label in enumerate(("spk_0", "spk_1"))
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan = load_speaker_name_plan(path)
+
+        names = name_speakers("remote", local, plan)
+        self.assertEqual(names, {"spk_0": "Alice", "spk_1": "Unknown 2"})
+        self.assertTrue(any("중복" in warning for warning in plan.warnings))
+
+    def test_broken_name_file_warns_and_keeps_unknown_names(self) -> None:
+        local = [segment(0.0, 5.0)]
+        local[0].aws_label = "spk_0"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "speaker-names.json"
+            path.write_text("{", encoding="utf-8")
+            plan = load_speaker_name_plan(path)
+
+        self.assertEqual(name_speakers("remote", local, plan), {"spk_0": "Unknown 1"})
+        self.assertTrue(plan.warnings)
+
+    def test_unobserved_name_match_warns_instead_of_failing(self) -> None:
+        local = [segment(0.0, 5.0)]
+        local[0].aws_label = "spk_0"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "speaker-names.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "participants": {"remote": ["Alice"]},
+                        "matches": {
+                            "remote": {
+                                "spk_9": {
+                                    "name": "Alice",
+                                    "status": "verified",
+                                    "method": "user-confirmed",
+                                    "evidence": [{"start": 1.0, "text": "confirmed"}],
+                                }
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan = load_speaker_name_plan(path)
+
+        self.assertEqual(name_speakers("remote", local, plan), {"spk_0": "Unknown 1"})
+        self.assertTrue(any("감지되지 않은" in warning for warning in plan.warnings))
 
 
 class TextComparisonTests(unittest.TestCase):
@@ -573,13 +674,110 @@ class MergeEndToEndTests(unittest.TestCase):
             ]
             by_id = {r["id"]: r for r in records}
 
-            # remote가 A/B로 갈렸다.
-            self.assertEqual(by_id["2"]["speaker"], "Remote A")
-            self.assertEqual(by_id["3"]["speaker"], "Remote B")
+            # 이름 근거가 없으면 오류 대신 Unknown 이름으로 갈린다.
+            self.assertEqual(by_id["2"]["speaker"], "Unknown 1")
+            self.assertEqual(by_id["3"]["speaker"], "Unknown 2")
             # me는 손대지 않았다 — 마이크 입력의 화자는 이미 확정이다.
             self.assertEqual(by_id["1"]["speaker"], "Me")
             # 원래 소스가 남아 있어 추정 없는 2분리로 되돌릴 수 있다.
             self.assertEqual({r["source"] for r in records}, {"me", "remote"})
+
+    def test_merge_applies_verified_name_and_preserves_anonymous_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self.build_session(tmp)
+            names_path = session / "speaker-names.json"
+            names_path.write_text(
+                json.dumps(
+                    {
+                        "participants": {"remote": ["Alice", "Bob"]},
+                        "matches": {
+                            "remote": {
+                                "spk_0": {
+                                    "name": "Alice",
+                                    "status": "verified",
+                                    "method": "self-identification",
+                                    "evidence": [{"start": 2.5, "text": "I'm Alice"}],
+                                },
+                                "spk_1": {
+                                    "name": "Bob",
+                                    "status": "candidate",
+                                    "method": "conversation-context",
+                                    "evidence": [{"start": 6.5, "text": "I own the API"}],
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary = merge(
+                session=session,
+                aws_paths={"remote": session / "aws-remote.json"},
+                out_dir=session,
+                speaker_name_plan=load_speaker_name_plan(names_path),
+            )
+            records = [
+                json.loads(line)
+                for line in (session / "transcript.speakers.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            report = (session / "diarization-report.md").read_text(encoding="utf-8")
+
+        by_id = {record["id"]: record for record in records}
+        self.assertEqual(by_id["2"]["speaker"], "Alice")
+        self.assertEqual(by_id["2"]["aws_label"], "spk_0")
+        self.assertEqual(by_id["2"]["speaker_name_status"], "verified")
+        self.assertEqual(by_id["3"]["speaker"], "Unknown 2")
+        self.assertEqual(summary["sources"]["remote"]["name_candidates"], {"spk_1": "Bob"})
+        self.assertIn("후보: Bob", report)
+
+    def test_merge_with_broken_name_file_still_writes_unknown_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self.build_session(tmp)
+            names_path = session / "speaker-names.json"
+            names_path.write_text("{", encoding="utf-8")
+            summary = merge(
+                session=session,
+                aws_paths={"remote": session / "aws-remote.json"},
+                out_dir=session,
+                speaker_name_plan=load_speaker_name_plan(names_path),
+            )
+            records = [
+                json.loads(line)
+                for line in (session / "transcript.speakers.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+
+        by_id = {record["id"]: record for record in records}
+        self.assertEqual(by_id["2"]["speaker"], "Unknown 1")
+        self.assertEqual(by_id["3"]["speaker"], "Unknown 2")
+        self.assertTrue(summary["name_warnings"])
+
+    def test_participant_count_mismatch_is_reported_without_merging_speakers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self.build_session(tmp)
+            names_path = session / "speaker-names.json"
+            names_path.write_text(
+                json.dumps({"participants": {"remote": ["Alice"]}, "matches": {}}),
+                encoding="utf-8",
+            )
+            summary = merge(
+                session=session,
+                aws_paths={"remote": session / "aws-remote.json"},
+                out_dir=session,
+                speaker_name_plan=load_speaker_name_plan(names_path),
+            )
+            report = (session / "diarization-report.md").read_text(encoding="utf-8")
+
+        remote = summary["sources"]["remote"]
+        self.assertTrue(remote["participant_count_mismatch"])
+        self.assertEqual(
+            remote["names"],
+            {"spk_0": "Unknown 1", "spk_1": "Unknown 2"},
+        )
+        self.assertIn("인원 불일치", report)
 
     def test_local_text_is_never_replaced_by_aws(self) -> None:
         """본문은 로컬 전사를 유지한다.

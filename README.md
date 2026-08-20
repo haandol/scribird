@@ -218,14 +218,15 @@ lifted afterwards, by a tool that isn't the app.
 [`plugin/scribird-diarize`](./plugin/README.md) is a Claude Code plugin that does exactly that.
 It sends `remote.m4a` to Amazon Transcribe for speaker partitioning, overlays only the speaker
 boundaries onto the transcript you already have, splitting the single `상대방` label
-(*remote*, as the app writes it) into `상대방 A` / `상대방 B`:
+(*remote*, as the app writes it) into actual participant names when evidence supports them,
+or `Unknown 1` / `Unknown 2` otherwise:
 
 ```
 Before   [상대방]   00:12  Let's ship on Tuesday next week, then.
          [상대방]   00:18  I'd prefer the week after. QA needs the time.
 
-After    [상대방 A] 00:12  Let's ship on Tuesday next week, then.
-         [상대방 B] 00:18  I'd prefer the week after. QA needs the time.
+After    [Alice]     00:12  Let's ship on Tuesday next week, then.
+         [Unknown 2] 00:18  I'd prefer the week after. QA needs the time.
 ```
 
 > [!WARNING]
@@ -234,8 +235,9 @@ After    [상대방 A] 00:12  Let's ship on Tuesday next week, then.
 > own. It uses your local `aws` credentials, prints exactly what it is about to send, and
 > refuses to proceed until you confirm.
 >
-> By default it **streams** the audio over a WebSocket, so nothing is stored in S3 — no bucket
-> to create, no object left behind to forget about.
+> The plugin uploads the saved M4A to a private S3 location and runs an Amazon Transcribe batch
+> job. It states the required AWS permissions and temporary storage location before asking for
+> approval, and deletes the job objects after a successful run unless you explicitly keep them.
 
 ### Prerequisites
 
@@ -246,9 +248,8 @@ After    [상대방 A] 00:12  Let's ship on Tuesday next week, then.
 | A region set | `aws configure get region` |
 | Python 3 | already there — macOS ships `/usr/bin/python3`, and nothing needs `pip install` |
 
-IAM permission needed for the default streaming path is just
-`transcribe:StartStreamTranscription`. The batch path additionally needs `s3:CreateBucket`,
-`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket`,
+The batch path needs `s3:CreateBucket`, `s3:PutBucketPublicAccessBlock`, `s3:PutObject`,
+`s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket`,
 `transcribe:StartTranscriptionJob`, and `transcribe:GetTranscriptionJob`.
 
 ### Install
@@ -291,7 +292,10 @@ split the remote speaker in ~/Documents/Scribird/2026-07-31_142530 by participan
 
 The agent picks the session, reads the language out of your existing transcript, shows you what
 is about to be sent, and waits. Nothing leaves the machine until you say yes. It then reports
-how many speakers were found and which words the two engines heard differently.
+how many speakers were found and which words the two engines heard differently. Before analysis,
+it asks for the participant count and names you know. Names and optional role hints stay local;
+verified matches are applied, and every unresolved speaker receives a stable `Unknown N` name
+instead of failing the merge.
 
 You can also run the scripts directly, which is useful when you want to see the exact steps:
 
@@ -300,13 +304,21 @@ cd plugin/scribird-diarize/skills/multi-speaker-diarize
 SESSION=~/Documents/Scribird/2026-07-31_142530
 
 # 1. Print the plan and stop (exit 3). Nothing has been sent yet.
-/usr/bin/python3 scripts/stream_transcribe.py --session "$SESSION" --language-code ko-KR
+/usr/bin/python3 scripts/run_transcribe.py \
+  --session "$SESSION" --language-code ko-KR --max-speakers 5
 
 # 2. Approve and run it.
-/usr/bin/python3 scripts/stream_transcribe.py --session "$SESSION" --language-code ko-KR --yes
+/usr/bin/python3 scripts/run_transcribe.py \
+  --session "$SESSION" --language-code ko-KR --max-speakers 5 --yes
 
 # 3. Overlay the speaker boundaries onto your transcript.
 /usr/bin/python3 scripts/merge_speakers.py --session "$SESSION" --aws-remote "$SESSION/aws-remote.json"
+
+# 4. Optionally apply locally verified participant names.
+/usr/bin/python3 scripts/merge_speakers.py \
+  --session "$SESSION" \
+  --aws-remote "$SESSION/aws-remote.json" \
+  --speaker-names "$SESSION/speaker-names.json"
 ```
 
 ### What you get
@@ -318,6 +330,10 @@ Three new files land next to the originals, which are never modified:
 | `transcript.speakers.md` | The readable transcript, now split by speaker. Body text is still your on-device transcript |
 | `transcript.speakers.jsonl` | Machine-readable. Keeps the original `me`/`remote` in a `source` field, so the certain two-way split is always recoverable |
 | `diarization-report.md` | How many speakers, how much each one talked, and every word the two engines wrote differently |
+
+When participant names are provided, `speaker-names.json` remains local and records the evidence
+used for verified names and candidates. Invalid or conflicting entries are reported as warnings;
+they do not prevent the three result files from being generated.
 
 ### Two properties worth knowing
 
@@ -332,18 +348,12 @@ These are what make the result trustworthy:
   reported rather than silently applied — deciding which one is right needs meaning, and the
   script doesn't claim to have it.
 
-### When you need the batch path instead
+### Batch behavior
 
-Streaming can't do two things, and `scripts/run_transcribe.py` exists for exactly those:
-
-| | Streaming (default) | Batch |
-|---|---|---|
-| S3 | **not used** | creates a bucket, uploads, deletes after |
-| Speaker count | up to 10, not adjustable | `--max-speakers` 2–30 |
-| Multiple languages | one language only | multi-language identification |
-
-So reach for batch when more than 10 people attended, or when the meeting genuinely switches
-between two languages in comparable amounts. Otherwise streaming is the better trade.
+The plugin has one cloud-analysis path: upload to S3 and run an Amazon Transcribe batch job.
+It can set `--max-speakers` from 2–30 and use multi-language identification. A missing bucket
+is created with public access blocked; successful runs delete their per-run objects by default.
+There is no streaming fallback.
 
 See [`plugin/README.md`](./plugin/README.md) for the full option list and the reasoning behind
 each default.
