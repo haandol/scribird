@@ -145,14 +145,16 @@ cd plugin/scribird-diarize/skills/multi-speaker-diarize
 
 ## 스킬 구조
 
-`SKILL.md`는 작업 흐름만 담고, 근거와 문제 해결은 `references/`로 내렸다. 스킬이
-트리거될 때마다 본문 전체가 컨텍스트에 들어가므로, 매번 필요하지 않은 것은 참조로
-두는 편이 낫다.
+`SKILL.md`는 공통 경계와 단계 라우팅만 담는다. AWS 실행 전 단계와 병합 후 검토는
+각 단계에 진입할 때만 읽는 참조로 분리했고, 이름 매칭·판정 근거·문제 해결도 필요할
+때만 읽는다. 스킬이 트리거될 때마다 진입점 전체가 컨텍스트에 들어가기 때문이다.
 
 ```
 skills/multi-speaker-diarize/
-├── SKILL.md                        # 작업 흐름 (5단계)
+├── SKILL.md                        # 공통 경계와 참조 라우터
 ├── references/
+│   ├── batch-job.md                # 세션 선택, AWS preflight·승인·실행
+│   ├── merge-review.md             # 병합, 산출물 검토, 재실행 조건
 │   ├── thresholds.md               # 판정 기준의 실측 근거, 시간 정렬
 │   ├── speaker-name-matching.md     # 참석자 정보와 근거 기반 실제 이름 매칭
 │   └── troubleshooting.md          # AWS·S3·배치 작업의 증상별 대응

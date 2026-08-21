@@ -1,6 +1,6 @@
 {
   "name": "scribird-diarize",
-  "version": "0.2.0+codex.20260820101701",
+  "version": "0.2.1+codex.20260821003811",
   "description": "Split the merged remote speaker into verified participant names or Unknown N using an approved S3 batch job.",
   "author": {
     "name": "haandol",
