@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scribird Release Preparation"
+  short_description: "Prepare a verified Scribird release and release notes"
+  default_prompt: "Use $prepare-scribird-release to prepare the current Scribird release, including verified release notes and artifacts."
