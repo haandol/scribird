@@ -40,7 +40,7 @@ protocol CaptureSource: AudioLevelSource {
 /// 캡처 버퍼를 전사기 입력 스트림으로 흘려보내는 배관.
 ///
 /// 마이크와 시스템 출력은 **여는 방식만** 다르다 — `AVAudioEngine` 탭이냐 Core Audio
-/// process tap이냐. 그 뒤의 처리는 같다: 원본을 저장하고, 진폭을 재고, 리샘플링해서
+/// process tap이냐. 그 뒤의 처리는 같다: 합본 저장기로 보내고, 진폭을 재고, 리샘플링해서
 /// 프레임 기준 시각을 붙여 내보낸다. 그 공통 부분을 여기 한 번만 둔다.
 ///
 /// **소스별로 인스턴스를 따로 갖는다.** 두 경로가 서로 독립이라는 불변식은 이 타입을
@@ -60,6 +60,8 @@ final class AnalyzerInputPump: @unchecked Sendable {
     private var sourceFormat: AVAudioFormat?
     /// 지금까지 넘긴 프레임 수. 시간축을 프레임 기준으로 쌓는다.
     private var framesSent: AVAudioFramePosition = 0
+    /// 마이크 내용을 전사·저장하지 않고 같은 길이의 무음으로 바꿀지.
+    private var muted = false
 
     /// 입력 레벨. 미터 표시와 무음 감지에 함께 쓴다.
     let level = AudioLevelTracker()
@@ -107,21 +109,37 @@ final class AnalyzerInputPump: @unchecked Sendable {
     /// "콜백이 온다"만으로는 정상 동작을 판단할 수 없다.
     var peakLevel: Float { level.sessionPeak }
 
+    func setMuted(_ muted: Bool) {
+        lock.withLock { self.muted = muted }
+        if muted { level.clearRecent() }
+    }
+
     /// 캡처 콜백에서 받은 버퍼 하나를 처리한다.
     ///
     /// 캡처 포맷이 바뀌면 변환기를 다시 만든다 — 입력 장치를 갈아 끼우면 마이크
     /// 경로에서 실제로 일어난다.
-    func submit(_ buffer: AVAudioPCMBuffer) {
+    func submit(_ buffer: AVAudioPCMBuffer, hostTime: UInt64? = nil) {
         guard buffer.frameLength > 0 else { return }
 
-        // 원본 저장은 리샘플링 전에 한다. 16kHz 모노로 줄인 뒤 저장하면 재처리
-        // 가치가 사라진다.
-        audioRecorder?.write(buffer, for: speaker)
+        let muted = lock.withLock { self.muted }
+        // 음소거 중에는 원본 저장과 전사 양쪽에 같은 무음을 사용한다. 한쪽만 가리면
+        // 화면에는 없지만 파일에는 목소리가 남는 privacy 실패가 된다.
+        let submittedBuffer: AVAudioPCMBuffer
+        if muted {
+            guard let silent = buffer.silentCopy() else { return }
+            submittedBuffer = silent
+        } else {
+            submittedBuffer = buffer
+        }
+
+        // 합본은 전사와 다른 큐에서 장치 포맷을 48kHz 모노로 바꾼다. 공통
+        // hostTime을 함께 넘겨 콜백 도착 순서가 파일 타이밍을 정하지 않게 한다.
+        audioRecorder?.write(submittedBuffer, for: speaker, atHostTime: hostTime)
 
         lock.lock()
-        if sourceFormat != buffer.format {
-            converter = AudioStreamConverter(from: buffer.format, to: targetFormat)
-            sourceFormat = buffer.format
+        if sourceFormat != submittedBuffer.format {
+            converter = AudioStreamConverter(from: submittedBuffer.format, to: targetFormat)
+            sourceFormat = submittedBuffer.format
         }
         let converter = self.converter
         let continuation = self.continuation
@@ -130,19 +148,31 @@ final class AnalyzerInputPump: @unchecked Sendable {
 
         // 인터리브 배치는 소스와 장치에 따라 다르다. peakAmplitude()가 형식을 보고
         // 알맞게 읽는다. 자체 락을 쓰므로 위 락 밖에서 호출한다.
-        level.submit(peak: buffer.peakAmplitude())
+        if !muted {
+            level.submit(peak: submittedBuffer.peakAmplitude())
+        }
 
         guard let converter, let continuation,
-              let converted = converter.convert(buffer)
+              let converted = converter.convert(submittedBuffer)
         else { return }
+
+        // 리샘플러는 직전 입력 일부를 내부에 보관했다가 다음 변환에서 내보낼 수 있다.
+        // 입력만 무음으로 바꾸면 음소거 직전 음성이 이 버퍼에 섞이므로 출력도 다시 막는다.
+        let outputBuffer: AVAudioPCMBuffer
+        if muted {
+            guard let silent = converted.silentCopy() else { return }
+            outputBuffer = silent
+        } else {
+            outputBuffer = converted
+        }
 
         // 시간축은 넘긴 프레임 수로 쌓는다. hostTime을 쓰면 장치 지연이 섞인다.
         let startTime = CMTime(
             value: startFrame,
             timescale: CMTimeScale(targetFormat.sampleRate)
         )
-        lock.withLock { framesSent += AVAudioFramePosition(converted.frameLength) }
+        lock.withLock { framesSent += AVAudioFramePosition(outputBuffer.frameLength) }
 
-        continuation.yield(AnalyzerInput(buffer: converted, bufferStartTime: startTime))
+        continuation.yield(AnalyzerInput(buffer: outputBuffer, bufferStartTime: startTime))
     }
 }

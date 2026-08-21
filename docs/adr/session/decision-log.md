@@ -4,6 +4,18 @@
 상태만 서술하고, "무엇이 왜 바뀌었나"의 시간축은 여기에 역순으로 쌓는다. 개별
 diff 는 Git 이 보존한다.
 
+## 2026-08-21 — 기본 회의 언어를 English로 두고 필수 모델을 시작 시 확보한다
+
+- **현재 ADR**: [settings-surface-separation](./0003-settings-surface-separation.md)
+- **변경 유형**: 요구사항 값 변경
+- **무엇이**: 기본 회의 언어가 한국어+English였다 → English이며, 필수 English Speech
+  에셋이 없으면 앱 시작 시 macOS 설치를 자동으로 시작한다. 버전 조회는 계속 사용자 요청
+  시에만 실행된다.
+- **왜**: English는 앱이 항상 제공해야 하는 기본 전사 언어라 첫 실행에서 설정을 찾아 설치해야
+  하는 상태를 허용하지 않기로 했다.
+- **무효가 된 것**: 사용자가 요청하지 않은 네트워크 통신은 어떤 종류도 없다는 설명. 현재는
+  회의 데이터를 보내지 않는 macOS English Speech 에셋 설치만 시작 시 예외다.
+
 ## 2026-08-06 — 회의 언어를 전사 화면에서도 바꾼다
 
 - **현재 ADR**: [settings-surface-separation](./0003-settings-surface-separation.md)

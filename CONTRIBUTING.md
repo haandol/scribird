@@ -53,7 +53,7 @@ system-audio path, you need a real certificate — a free Apple Developer accoun
 
 ## ADR-first workflow
 
-Design decisions live in [`docs/adr/`](./docs/adr/), and the ADR comes **before** the code.
+Design decisions are recorded in the repository's ADR index, and the ADR comes **before** the code.
 
 - **Behavior changes** — update the relevant ADR first, then bring the code to it in the
   same commit. That includes changing a requirement value even when it looks like a one-line
@@ -62,9 +62,8 @@ Design decisions live in [`docs/adr/`](./docs/adr/), and the ADR comes **before*
   requirement?
 - **Bug fixes, refactors, docs, formatting** — no ADR needed. A structural change that does
   not alter behavior is scoped by the pull request itself.
-- **New areas** — write the ADR directly. See
-  [`docs/adr/authoring-rules.md`](./docs/adr/authoring-rules.md) for what belongs in one and
-  what does not.
+- **New areas** — write the ADR directly. Follow the authoring rules kept with the ADR
+  index for what belongs in one and what does not.
 
 The ADR body records *why*, the alternatives that were rejected, and the requirement
 contract the result must honor. It never carries file paths or function names, and code
@@ -130,21 +129,19 @@ the message and either fix the defect or leave the skip alone.
 
 ### Taking screenshots for the docs
 
-Screenshots live in `docs/images/`. Take them by hand, from a real session you're willing to
-show — open the transcript window with the global hotkey, get it into the state you want, then
-capture that window alone rather than cropping a full-screen shot:
+Screenshots live in `docs/images/` and are rendered from the real `TranscriptView` and
+`SettingsView` with fixed English mock data. Regenerate both images with:
 
 ```bash
-screencapture -w -o out.png     # click the window; -o drops the drop shadow
+SCRIBIRD_UPDATE_DOC_SCREENSHOTS=1 \
+  swift test --filter DocumentationScreenshotTests/test_generateEnglishReadmeScreenshots
 ```
 
-**Never capture a real meeting.** Whatever is on screen ends up in the repository, and this
-project doesn't commit meeting content in any form. Say something innocuous into the mic and
-play innocuous audio for the remote side, or replace the text afterwards.
-
-There is deliberately no fixture or demo mode for this. Code that fabricates transcript
-content has to sit in the same state machine that records real meetings, and that's a bad place
-for a switch whose whole job is to make the app show things that never happened.
+The test opens actual AppKit windows so native controls and lazy transcript rows complete their
+normal layout before the content views are captured at Retina resolution. Mock state injection
+is compiled only in debug builds and is not reachable from the release app. Never replace these
+with a real meeting capture or hand-edit transcript text into a screenshot — meeting content is
+not committed in any form.
 
 ### Manual smoke test
 
@@ -153,10 +150,16 @@ Hardware capture, session rotation, and the global hotkey cannot be covered by `
 paths need a manual pass:
 
 **Capture.** Build and install the bundle, start a recording, confirm both level meters move,
-speak and play remote audio, then stop. Verify `transcript.jsonl`, `transcript.md`, `me.m4a`,
-and `remote.m4a` exist in `~/Documents/Scribird/<date_time>/` (or under the save location if you
-changed it), and that the `.m4a` files actually open — a container that was never finalized still
+speak and play remote audio, then stop. Verify `transcript.jsonl`, `transcript.md`, and
+`meeting.m4a` exist in `~/Documents/Scribird/<date_time>/` (or under the save location if you
+changed it), and that `meeting.m4a` actually opens — a container that was never finalized still
 has bytes on disk.
+
+**Microphone mute.** While Scribird has focus and recording is active, press the configured
+microphone-mute shortcut (default `⌘Y`). The microphone meter must switch to muted with no dB
+value while the system meter continues moving. Change the shortcut in settings and confirm the
+new combination applies immediately, then put another app in front and confirm it is not
+intercepted.
 
 **Session rotation.** While recording, start a new session, keep speaking, then stop. Two
 session directories must exist, each with a playable `.m4a` and a `transcript.md` whose
@@ -179,7 +182,8 @@ throw an uncaught Auto Layout exception, and it leaves no crash report. The wind
 now and tabs scroll inside it, so the remaining risk is a tab that needs more height than the
 window has.
 
-**Meeting language, switched mid-recording.** Start a recording with `한국어 + English`, say a
+**Meeting language, switched mid-recording.** Install Korean, start a recording with
+`한국어 + English`, say a
 sentence, then narrow it to `한국어` from the transcript window's picker. Three things must hold:
 both level meters keep moving, the `.m4a` files keep growing, and — the one that actually broke —
 **the sentence you said just before the switch is in `transcript.md`.** A transcriber holds an

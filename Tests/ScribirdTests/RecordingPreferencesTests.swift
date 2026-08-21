@@ -3,7 +3,7 @@ import XCTest
 
 /// 설정 창 항목의 영속화 테스트.
 ///
-/// 검증 대상 계약: 기본값은 `한국어 + English`와 원본 저장 켬이다 / 사용자가 정한 값은
+/// 검증 대상 계약: 기본값은 `English`와 회의 음성 저장 켬이다 / 사용자가 정한 값은
 /// 앱을 다시 켜도 유지된다 / 해석할 수 없는 저장값은 기본값으로 되돌린다.
 ///
 /// 이 계약이 없을 때의 실패는 조용하다 — 원본 저장을 끈 사용자가 그것이 켜진 것을 모른 채
@@ -29,10 +29,10 @@ final class RecordingPreferencesTests: XCTestCase {
 
     // MARK: - 기본값
 
-    /// 어느 언어로 진행될지 모르는 회의에서 한쪽만 켜 두면 다른 언어가 통째로 빠진다.
-    func test_language_withNothingStored_isMultilingual() {
-        XCTAssertEqual(RecordingPreferences.language(from: defaults), .auto,
-                       "저장값이 없을 때 기본 언어 구성이 한국어 + English가 아니다")
+    /// English는 앱이 시작 시 확보하는 필수 모델이므로 첫 선택도 그 모델만 요구해야 한다.
+    func test_language_withNothingStored_isEnglish() {
+        XCTAssertEqual(RecordingPreferences.language(from: defaults), .english,
+                       "저장값이 없을 때 기본 언어 구성이 English가 아니다")
     }
 
     /// 재전사 여지를 남기는 쪽이 기본이다.
@@ -132,7 +132,7 @@ final class RecordingPreferencesTests: XCTestCase {
     func test_unknownStoredLanguage_fallsBackToDefault() {
         defaults.set("klingon", forKey: "transcriptionLanguage")
 
-        XCTAssertEqual(RecordingPreferences.language(from: defaults), .auto,
+        XCTAssertEqual(RecordingPreferences.language(from: defaults), .english,
                        "해석할 수 없는 언어 값이 기본값으로 되돌려지지 않았다")
     }
 
@@ -140,7 +140,7 @@ final class RecordingPreferencesTests: XCTestCase {
     func test_nonStringStoredLanguage_fallsBackToDefault() {
         defaults.set(42, forKey: "transcriptionLanguage")
 
-        XCTAssertEqual(RecordingPreferences.language(from: defaults), .auto,
+        XCTAssertEqual(RecordingPreferences.language(from: defaults), .english,
                        "문자열이 아닌 언어 값이 기본값으로 되돌려지지 않았다")
     }
 }

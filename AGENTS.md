@@ -214,11 +214,12 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   text pass or fail depending on the system language of whoever runs them. Pass the language
   explicitly, or assert the rule (two labels differ, four buttons are distinct) instead of the
   words.
-- **Never fetch without the user asking.** The update check is the only network call in
-  the app, and it fires only from the button press. Do not add a launch check, a periodic
-  check, or a preference that enables one — even defaulted off, that turns "this app makes
-  no network requests" into a claim the user has to verify in settings. The request must
-  also carry nothing the app produced: no transcript, no usage counts, no device id.
+- **Network use has one launch-time system-asset exception.** English is the mandatory
+  default transcription language, so when its Speech asset is absent the app asks macOS to
+  install it at launch. Korean remains user-initiated from settings. The update check is the
+  only app-owned external lookup and fires only from its button; do not add launch or periodic
+  release checks. No request may carry app-produced data: no transcript, usage counts, audio,
+  or device id.
 - **Compare versions positionally.** String comparison ranks `0.10.0` below `0.9.0`, so a
   user on 0.9.0 is never told about the 0.10.0 release. Read the running version from the
   bundle rather than a constant in code, or the two drift apart.
@@ -287,8 +288,8 @@ classes need matching isolation rather than weakened source annotations.
 
 Hardware capture changes cannot be covered this way and require a manual smoke test:
 build and install the bundle, start a recording, confirm both level meters move, speak and
-play remote audio, then stop and verify `transcript.jsonl`, `transcript.md`, `me.m4a`, and
-`remote.m4a` in `~/Documents/Scribird/<date_time>/`. Verify that the `.m4a` files actually
+play remote audio, then stop and verify `transcript.jsonl`, `transcript.md`, and `meeting.m4a`
+in `~/Documents/Scribird/<date_time>/`. Verify that `meeting.m4a` actually
 open — a container that was never finalized still has bytes on disk.
 
 Session rotation and the global hotkey also need that manual pass, since neither the
@@ -301,12 +302,16 @@ Carbon event target nor a live capture rotation exists under `swift test`:
 - Press the hotkey from another frontmost app, click that app, and confirm the transcript
   window stays visible. Then set a combination already taken by another app and confirm
   the footer reports the failure instead of failing silently.
+- While recording with Scribird focused, press `⌘Y` and confirm only the microphone becomes
+  muted while the system meter continues. Press it again to unmute, then put another app in
+  front and confirm Scribird does not intercept that app's `⌘Y`.
 - Open settings with `⌘,`, confirm the transcript window behind it stays visible and
   recording continues, and that the audio-saving and save-location rows are disabled with a
   stated reason while recording. Then click through all three tabs and confirm the app survives
   and no tab clips its last row — the crash this guards against left no crash report, so a test
   run that never switches tabs looks clean.
-- While recording, narrow the meeting language from `한국어 + English` to `한국어` in the
+- After installing Korean, while recording narrow the meeting language from
+  `한국어 + English` to `한국어` in the
   transcript window. Both meters must keep moving, the `.m4a` files must keep growing, and **the
   sentence spoken just before the switch must appear in `transcript.md`** — that utterance is
   normally still un-finalized, so detaching its transcriber without draining loses everything

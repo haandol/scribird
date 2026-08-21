@@ -119,18 +119,20 @@ struct HotKeyShortcut: Equatable, Sendable {
 extension HotKeyShortcut {
     /// 저장되는 단축키의 종류.
     ///
-    /// 두 단축키는 동작 범위가 다르다 — 전사 창 띄우기는 전역이고, 설정 열기는 전사 창이 앞에
-    /// 있을 때만 듣는다. 저장 방식은 같으므로 키 이름만 나눈다.
+    /// 세 단축키는 동작 범위가 다르다. 저장 방식은 같으므로 키 이름만 나눈다.
     enum Slot {
         /// 전사 창을 어디서든 띄운다. Carbon으로 전역 등록한다.
         case transcriptWindow
         /// 설정 창을 연다. 전사 창이 앞에 있을 때만 듣는다.
         case settingsWindow
+        /// 녹취 중 마이크 음소거를 토글한다. Scribird가 포커스를 가질 때만 듣는다.
+        case microphoneMute
 
         var keyCodeKey: String {
             switch self {
             case .transcriptWindow: "hotKeyCode"
             case .settingsWindow: "settingsHotKeyCode"
+            case .microphoneMute: "microphoneMuteHotKeyCode"
             }
         }
 
@@ -138,6 +140,7 @@ extension HotKeyShortcut {
             switch self {
             case .transcriptWindow: "hotKeyModifiers"
             case .settingsWindow: "settingsHotKeyModifiers"
+            case .microphoneMute: "microphoneMuteHotKeyModifiers"
             }
         }
 
@@ -149,6 +152,10 @@ extension HotKeyShortcut {
             // 점유하면 이 앱 안에서는 이길 수 없으므로 사용자가 바꿀 수 있어야 한다.
             case .settingsWindow: HotKeyShortcut(
                 keyCode: UInt32(kVK_ANSI_Comma),
+                modifiers: [.command]
+            )
+            case .microphoneMute: HotKeyShortcut(
+                keyCode: UInt32(kVK_ANSI_Y),
                 modifiers: [.command]
             )
             }

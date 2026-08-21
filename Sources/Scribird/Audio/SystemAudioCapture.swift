@@ -160,8 +160,8 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
                 &procID,
                 aggregate,
                 nil
-            ) { [weak self] _, inputData, _, _, _ in
-                self?.handle(inputData)
+            ) { [weak self] _, inputData, inputTime, _, _ in
+                self?.handle(inputData, timeStamp: inputTime.pointee)
             }
             guard procStatus == noErr, let procID else {
                 throw CaptureError.ioProcFailed(procStatus)
@@ -230,7 +230,10 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
 
     // MARK: - 오디오 콜백
 
-    private func handle(_ inputData: UnsafePointer<AudioBufferList>) {
+    private func handle(
+        _ inputData: UnsafePointer<AudioBufferList>,
+        timeStamp: AudioTimeStamp
+    ) {
         guard let format = lock.withLock({ tapFormat }) else { return }
 
         // AudioBufferList를 AVAudioPCMBuffer로 감싼다. 이 포인터는 콜백 안에서만
@@ -241,7 +244,8 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
             bufferListNoCopy: inputData
         ) else { return }
 
-        pump.submit(buffer)
+        let hasHostTime = timeStamp.mFlags.contains(.hostTimeValid)
+        pump.submit(buffer, hostTime: hasHostTime ? timeStamp.mHostTime : nil)
     }
 
     // MARK: - Core Audio 헬퍼
@@ -319,11 +323,23 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
             &size,
             &asbd
         )
-        guard status == noErr,
-              let format = AVAudioFormat(streamDescription: withUnsafePointer(to: asbd) { $0 })
-        else {
+        guard status == noErr, let format = audioFormat(from: asbd) else {
             throw CaptureError.formatUnavailable
         }
+        return format
+    }
+
+    /// Core Audio가 채운 ASBD를 포인터의 유효 범위 안에서 `AVAudioFormat`으로 복사한다.
+    ///
+    /// `withUnsafePointer`에서 포인터 자체를 반환하면 클로저가 끝나는 순간 무효가 된다.
+    /// 그 포인터로 포맷을 만들었을 때 실측 로그에는 `0 Hz`, 임의의 채널 수와 포맷 ID가
+    /// 나타났고 변환기 생성이 -50으로 실패했다.
+    static func audioFormat(from streamDescription: AudioStreamBasicDescription) -> AVAudioFormat? {
+        var streamDescription = streamDescription
+        let format = withUnsafePointer(to: &streamDescription) {
+            AVAudioFormat(streamDescription: $0)
+        }
+        guard let format, format.sampleRate > 0, format.channelCount > 0 else { return nil }
         return format
     }
 }

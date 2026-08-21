@@ -15,31 +15,31 @@
 
 Scribird writes down your Zoom or Teams meeting while it happens. Your microphone is
 labeled **me**, whatever comes out of your speakers is labeled **remote**, and when the
-meeting ends you are left with a transcript and the original audio in a single folder.
+meeting ends you are left with a transcript and the meeting audio in a single folder.
 
 Transcription and storage both happen on your machine. **Neither the meeting audio nor the
-transcript ever leaves the device.** The app makes exactly one network request, and only
-when you press *Check for updates* in settings — see [Network use](#network-use).
+transcript ever leaves the device.** macOS may download the mandatory English Speech asset
+at launch, and the app checks for releases only when you press *Check for updates* — see
+[Network use](#network-use).
 
 The interface is available in **Korean and English**, following your system language by default
-and switchable in settings. Screenshots in this document were taken with the Korean interface, so
-where it names a button it quotes that Korean and puts the English alongside — what you see on
-screen depends on your language setting.
+and switchable in settings. The screenshots below use the English interface and fixed,
+non-identifying mock meeting data rendered by the real SwiftUI components.
 
 > [!NOTE]
 > A separate, opt-in [plugin](#optional-splitting-remote-into-individual-speakers) for Claude
-> Code and Codex can split *remote* into individual participants afterwards. It sends the saved
-> audio to **your own** AWS account, so it is deliberately outside the app — the app itself
-> still makes no network request beyond the update check.
+> Code and Codex can split *remote* in legacy source-separated sessions into individual
+> participants afterwards. It sends the saved audio to **your own** AWS account, so it is
+> deliberately outside the app. Scribird itself only asks macOS for the mandatory English
+> Speech asset at launch; release lookup remains user-initiated.
 
 <div align="center">
-  <img src="docs/images/transcript.png" width="620" alt="Scribird transcript window: status and elapsed time, per-source level meters, and a bilingual conversation with me aligned right and remote aligned left" />
+  <img src="docs/images/transcript.png" width="520" alt="Scribird transcript window in English: recording status, microphone mute control, per-source level meters, and a mock conversation with Me aligned right and Remote aligned left" />
 </div>
 
-*me* (「나」) is aligned right, *remote* (「상대방」) is aligned left, and the two use different
-colors. The `KO`/`EN` badge shows which language each utterance was recognized in. The last
-line is dimmed because it is still volatile — the moment it is finalized it sharpens and is
-written to disk.
+*Me* is aligned right, *Remote* is aligned left, and the two use different colors. The `EN`
+badge shows which language each utterance was recognized in. The last line is dimmed because
+it is still volatile — the moment it is finalized it sharpens and is written to disk.
 
 ## Features
 
@@ -48,15 +48,15 @@ written to disk.
 | **Automatic speaker attribution** | Microphone is *me*, system output is *remote*. The audio path decides the speaker, so there is nothing to infer and nothing to get wrong |
 | **Live transcription** | Volatile text appears dimmed while you speak and sharpens once finalized. Finalized text is written to disk immediately |
 | **Korean + English** | Both languages are recognized at once. Code-switching meetings keep both sides thanks to token-level arbitration |
-| **Switch language mid-meeting** | Pick the meeting language from the transcript window at any time, including while recording. The audio, the transcript, and the `.m4a` files all continue — only the transcribers change |
-| **Original audio kept** | One `.m4a` per source, captured before resampling — you can re-transcribe later |
+| **Switch language mid-meeting** | Pick any installed meeting language from the transcript window while recording. The audio and transcript continue — only the transcribers change |
+| **Meeting audio kept** | Microphone and system output are mixed live into one mono `meeting.m4a` for natural playback and later re-transcription |
 | **Silent failures surfaced** | A denied permission raises no error; it just delivers silence. Scribird judges by amplitude and warns you mid-recording |
 | **Input level meters** | Per-source dBFS in real time with the recommended range marked, so you don't find out after the meeting |
 | **Per-meeting session boundaries** | Starting a new meeting swaps the output files without interrupting capture — you don't lose the opening of the next meeting |
 | **Follows device changes** | Plug in a headset mid-meeting and capture moves with it, without splitting the transcript or the audio files |
 | **Or pin a device** | Choose a specific microphone or output device per source and capture stays there, even when the system default moves |
 | **Korean or English interface** | The screen follows your system language and can be switched in settings. Transcript files keep English speaker labels either way, so tools reading them see one vocabulary |
-| **Global hotkey** | `⌥⌘S` brings up the transcript window from anywhere, and it stays open when it loses focus. `⌘W` puts it away; closing it doesn't stop a recording. Both shortcuts are re-bindable |
+| **Shortcuts** | `⌥⌘S` brings up the transcript window globally. While Scribird has focus, the configurable microphone-mute shortcut (default `⌘Y`) toggles only your microphone |
 
 ## System Requirements
 
@@ -64,8 +64,8 @@ macOS 26 or later, on Apple silicon or Intel. The on-device `SpeechAnalyzer` API
 Scribird is built on does not exist on earlier releases, so there is no back-deployed
 build.
 
-The language model is downloaded by macOS on first use, not by Scribird. Expect a progress
-bar the first time you press Start for a given language.
+The English language model is mandatory. If it is missing, macOS downloads it when Scribird
+starts. Korean is optional and can be installed from settings.
 
 ## Installation
 
@@ -112,10 +112,10 @@ identifier.
 ## How to use it
 
 1. Click the waveform icon in the menu bar, or press `⌥⌘S`, to bring up the transcript window.
-2. Press **시작** / **Start**. On first run the language model is downloaded and progress is shown.
+2. Wait for the English model to show as installed, then press **Start**.
 3. Check that both level meters move — a meter that doesn't move means that source isn't arriving.
 4. When the meeting changes, press **✎** to cut the transcript. Capture is not interrupted.
-5. Press **중지** / **Stop**. It wraps up within 6 seconds and shows a link to the output folder.
+5. Press **Stop**. It wraps up within 6 seconds and shows a link to the output folder.
 
 ### Reading the level meters
 
@@ -129,16 +129,16 @@ and a link to the relevant System Settings pane.
 
 Everything you set once and forget lives in the settings window (`⌘,`), split across three tabs
 by what the setting is *about* — **General** (interface language, both hotkeys, the update check),
-**Recording** (meeting language, plus what the output contains and where it goes), and **Device**
+**Recording** (language models, meeting language, plus what the output contains and where it goes), and **Device**
 (which microphone and which output device to capture). The transcript window keeps only what you
 look at during a meeting.
 
 **The meeting language is in both places on purpose.** You set it before a meeting in settings,
 but you find out it was wrong *during* one — a missing utterance is the signal — so the transcript
 window carries the same picker. Changing it there does not interrupt anything: capture keeps
-running, the `.m4a` files keep growing, and the transcript continues in the same file. If the
-model for the language you picked isn't installed yet, macOS downloads it while the previous
-language keeps transcribing, and the switch happens once it's ready.
+running, `meeting.m4a` keeps growing, and the transcript continues in the same file. Only
+installed language combinations appear. Install Korean from settings before selecting Korean
+or Korean + English.
 
 **The interface is available in Korean and English.** It follows your system language unless
 you pick one, and picking one keeps it even if the system language later changes. Note that this
@@ -148,19 +148,15 @@ regardless of this setting, because that file is read later by other tools and i
 should not depend on a preference.
 
 <div align="center">
-  <img src="docs/images/settings.png" width="480" alt="Scribird settings window showing transcription and capture device settings" />
+  <img src="docs/images/settings.png" width="480" alt="Scribird Recording settings in English: English installed, Korean available to install, meeting audio enabled, and the transcript folder" />
 </div>
 
-> [!NOTE]
-> The screenshot predates the tabbed layout — the sections it shows are now spread across the
-> three tabs described above. The behavior it illustrates is unchanged.
-
-The transcription rows are greyed out there because a recording is in progress — changing the
-language or audio-saving mid-session would contradict the transcribers and file handles that
-already exist, and the window says so rather than failing silently. **Capture devices stay
-editable while recording**, because that's exactly when you notice you picked the wrong one.
-So does the folder-opening toggle, which is only read when a recording stops, and so does the
-interface language, which only affects what's drawn.
+The Recording tab shows model status per language. English is mandatory and installed
+automatically when absent; Korean remains optional and is installed from this screen. During
+recording, settings that would contradict live transcribers or open file handles are disabled
+with an explanation. **Capture devices stay editable while recording**, because that's exactly
+when you notice you picked the wrong one. The folder-opening toggle and interface language also
+stay editable because they do not alter the live capture or archive.
 
 ## Where your data goes
 
@@ -194,29 +190,32 @@ Starting a *new session* mid-meeting does not open anything, since you're still 
 |---|---|
 | `transcript.jsonl` | One finalized utterance per line (speaker, timestamp, confidence, language), flushed as soon as it is finalized |
 | `transcript.md` | Readable transcript, grouped by speaker |
-| `me.m4a` | Microphone original (AAC, 128 kbps per channel) |
-| `remote.m4a` | System-output original (AAC, 128 kbps per channel) |
+| `meeting.m4a` | Microphone and system output mixed live into one 48 kHz mono AAC file |
 
-The `.m4a` files are only written when *음성 원본 저장* (save original audio) is on, which
+`meeting.m4a` is only written when *Save meeting audio* is on, which
 is the default. Nothing here is ever pruned or rotated — the folder grows until you delete
 from it.
 
 ### Network use
 
-The only network request in the app is the release lookup behind *새 버전 확인* (check for
-updates), and it fires only from that button press. There is no launch check, no periodic
-check, and no preference that enables one. The request carries nothing the app produced:
-no transcript, no usage counts, no device identifier. Scribird never downloads an update
+When the mandatory English Speech asset is absent, Scribird asks macOS to install it at
+launch. Korean is downloaded only after you press its install button in settings. These
+system asset requests never include meeting audio, transcripts, usage counts, or a device
+identifier.
+
+The release lookup behind *Check for updates* fires only from that button
+press. There is no launch or periodic release check. Scribird never downloads an update
 either — it points you at the release page and leaves signature verification to Gatekeeper.
 
 ## Optional: splitting *remote* into individual speakers
 
 Because a meeting app mixes participants down before Scribird ever sees them, *remote* is one
-label for everyone on the far side. The per-source `.m4a` files exist so that limit can be
-lifted afterwards, by a tool that isn't the app.
+label for everyone on the far side.
 
 [`plugin/scribird-diarize`](./plugin/README.md) is a Claude Code plugin that does exactly that.
-It sends `remote.m4a` to Amazon Transcribe for speaker partitioning, overlays only the speaker
+It currently supports legacy sessions that contain `remote.m4a` and `me.m4a`; current
+`meeting.m4a` sessions are not source-separated and are not accepted by this workflow. For
+legacy sessions it sends `remote.m4a` to Amazon Transcribe for speaker partitioning and overlays only the speaker
 boundaries onto the transcript you already have, splitting the single `상대방` label
 (*remote*, as the app writes it) into actual participant names when evidence supports them,
 or `Unknown 1` / `Unknown 2` otherwise:
@@ -384,7 +383,7 @@ defaults read com.scribird.app
 | Key | Setting | Default |
 |---|---|---|
 | `interfaceLanguage` | Interface language | unset (follow system language) |
-| `transcriptionLanguage` | Meeting language | `auto` (한국어 + English) |
+| `transcriptionLanguage` | Meeting language | `english` |
 | `savesOriginalAudio` | Save original audio | `true` |
 | `pinnedInputDeviceUID` | Pinned microphone | unset (follow system default) |
 | `pinnedOutputDeviceUID` | Pinned output device | unset (follow system default) |
@@ -503,19 +502,9 @@ the only TCC service its backing daemon `/usr/libexec/replayd` references. Calli
 bundle that declares only `NSAudioCaptureUsageDescription` fails with `-3801
 (userDeclined)`. A process tap uses `kTCCServiceAudioCapture` and nothing else.
 
-The reasoning behind each decision, and the alternatives that were rejected, are recorded as
-ADRs under [`docs/adr/`](./docs/adr/). If you want to know *why* something is the way it is,
-that's the primary source. The ADRs are written in Korean.
-
-- [System-audio capture path](./docs/adr/capture/0001-system-audio-process-tap.md) — why ScreenCaptureKit is not used
-- [Silent capture-failure detection](./docs/adr/capture/0002-silent-capture-detection.md) — judging by amplitude instead of return values
-- [Per-source failure isolation](./docs/adr/capture/0003-per-source-failure-isolation.md) — why one dead source doesn't end the session
-- [Source-based speaker attribution](./docs/adr/transcription/0001-source-based-speaker-attribution.md) — why the two-speaker ceiling is accepted
-- [Token-level language arbitration](./docs/adr/transcription/0002-token-level-language-arbitration.md) — code-switching measurements and the three rules
-- [Session boundary control](./docs/adr/session/0001-session-boundary-control.md) — cutting the transcript without cutting capture
-- [User-initiated update check](./docs/adr/session/0004-user-initiated-update-check.md) — why there is no automatic check
-- [Transcript durability](./docs/adr/archive/0001-transcript-durability.md) — appending the moment a segment is final
-- [Original audio format](./docs/adr/archive/0002-original-audio-format.md) — AAC 128k, and why 64k was dropped
+The reasoning behind each decision and the alternatives that were rejected are recorded in
+the repository's ADR index. If you want to know *why* something is the way it is, that is the
+primary source. The ADRs are written in Korean.
 
 ## Contributing
 

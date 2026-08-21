@@ -36,13 +36,13 @@ struct TranscriptView: View {
     ///
     /// 표시하는 값은 사용자가 고른 것이 아니라 **지금 실제로 동작 중인 구성**이다. 전환이
     /// 실패하면 이전 언어로 계속 기록되므로, 고른 값을 보여주면 어느 언어로 인식되는지가
-    /// 실제와 어긋나 결과를 해석할 수 없다. 다운로드를 기다리는 중일 때만 대상 언어를 보여준다.
+    /// 실제와 어긋나 결과를 해석할 수 없다.
     private var languagePicker: some View {
         Picker("", selection: Binding(
-            get: { recorder.pendingLanguage ?? recorder.language },
+            get: { recorder.language },
             set: { next in Task { await recorder.chooseLanguage(next) } }
         )) {
-            ForEach(TranscriptionLanguage.allCases) { language in
+            ForEach(recorder.availableLanguages) { language in
                 Text(language.displayName).tag(language)
             }
         }
@@ -50,12 +50,12 @@ struct TranscriptView: View {
         .pickerStyle(.menu)
         .controlSize(.small)
         .fixedSize()
-        .disabled(recorder.isPreparingModel)
-        .help(recorder.pendingLanguage.map {
-            tr("\($0.displayName) 모델을 내려받는 중입니다. 그동안 \(recorder.language.displayName)로 계속 기록합니다.",
-               "Downloading the \($0.displayName) model. Recording continues in \(recorder.language.displayName) until it's ready.")
-        } ?? tr("인식할 회의 언어입니다. 녹취 중에 바꿔도 소리와 회의록은 끊기지 않습니다.",
-                "The meeting language to recognize. Changing it while recording does not interrupt the audio or transcript."))
+        .disabled(recorder.availableLanguages.isEmpty || recorder.isPreparingModel)
+        .help(recorder.availableLanguages.isEmpty
+              ? tr("필수 English 모델을 준비하고 있습니다. 설정에서 상태를 확인해 주세요.",
+                   "The required English model is being prepared. Check its status in settings.")
+              : tr("인식할 회의 언어입니다. 녹취 중에 바꿔도 소리와 회의록은 끊기지 않습니다.",
+                   "The meeting language to recognize. Changing it while recording does not interrupt the audio or transcript."))
     }
 
     // MARK: - 헤더
@@ -105,7 +105,7 @@ struct TranscriptView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(recorder.state == .recording ? .red : .accentColor)
-            .disabled(isTransitioning)
+            .disabled(isTransitioning || (recorder.state != .recording && !recorder.canStartRecording))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
@@ -130,7 +130,7 @@ struct TranscriptView: View {
     private var statusTitle: String {
         switch recorder.state {
         case .idle: tr("대기 중", "Idle")
-        case .preparingModel: tr("언어 모델 준비 중", "Preparing language model")
+        case .preparingModel: tr("녹취 준비 중", "Preparing recording")
         case .recording: tr("녹취 중", "Recording")
         case .stopping: tr("마무리 중", "Finishing")
         case .failed: tr("오류", "Error")
@@ -142,9 +142,8 @@ struct TranscriptView: View {
         switch recorder.state {
         case .idle:
             Text(tr("시작을 누르면 바로 기록됩니다", "Press Start and it records right away"))
-        case .preparingModel(let fraction):
-            Text(tr("\(recorder.language.displayName) 모델 준비 \(Int(fraction * 100))%",
-                   "Preparing \(recorder.language.displayName) model \(Int(fraction * 100))%"))
+        case .preparingModel:
+            Text(tr("설치된 언어 모델 확인 중", "Checking installed language models"))
         case .recording:
             // 경과 시간은 상태 변화 없이도 흘러야 하므로 뷰가 스스로 째깍이게 한다.
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -272,9 +271,12 @@ struct TranscriptView: View {
     /// 소스 하나의 상태 + 실시간 입력 레벨 미터.
     private func sourceMeter(_ speaker: Speaker, warning: Bool) -> some View {
         let level = recorder.inputLevel(for: speaker)
-        let active = level != nil
+        let active = recorder.activeSources.contains(speaker)
+        let muted = speaker == .me && recorder.microphoneMuted
         let quality = level?.quality
         let tint: Color = if !active {
+            .secondary
+        } else if muted {
             .secondary
         } else if warning || quality == .silent {
             .orange
@@ -283,14 +285,20 @@ struct TranscriptView: View {
         }
 
         return HStack(spacing: 5) {
-            Image(systemName: active ? speaker.symbol : "xmark.circle")
+            Image(systemName: muted ? "mic.slash.fill" : (active ? speaker.symbol : "xmark.circle"))
                 .font(.system(size: 9))
                 .foregroundStyle(tint)
+                .frame(width: 16, height: 16)
             Text(speaker.displayName)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(tint)
 
-            if let level {
+            if muted {
+                Text(tr("음소거됨", "Muted"))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.red)
+                    .frame(width: 48, alignment: .leading)
+            } else if let level {
                 LevelBar(value: level.meter, quality: level.quality)
                 // dBFS를 함께 보여줘야 "작다"는 체감을 숫자로 확인할 수 있다.
                 Text(level.decibels > -99
@@ -304,6 +312,24 @@ struct TranscriptView: View {
                 Text(tr("꺼짐", "Off"))
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
+            }
+
+            if speaker == .me, active {
+                Button {
+                    recorder.toggleMicrophoneMute()
+                } label: {
+                    Label(
+                        muted ? tr("음소거 해제", "Unmute") : tr("음소거", "Mute"),
+                        systemImage: muted ? "mic.fill" : "mic.slash.fill"
+                    )
+                    .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(muted ? .red : .secondary)
+                .help(muted
+                      ? tr("마이크 음소거 해제", "Unmute microphone")
+                      : tr("마이크 음소거", "Mute microphone"))
             }
         }
     }
@@ -368,6 +394,17 @@ struct TranscriptView: View {
     private var scrollAnchor: String { "transcript-bottom" }
 
     private var emptyPane: some View {
+        Group {
+            if recorder.canStartRecording {
+                transcriptEmptyState
+            } else {
+                requiredEnglishModelState
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var transcriptEmptyState: some View {
         VStack(spacing: 9) {
             Image(systemName: "waveform.badge.mic")
                 .font(.system(size: 34, weight: .light))
@@ -386,7 +423,48 @@ struct TranscriptView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var requiredEnglishModelState: some View {
+        let state = recorder.modelManager.state(for: .english)
+        VStack(spacing: 10) {
+            Image(systemName: "character.book.closed.fill")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.secondary)
+
+            switch state {
+            case .installing(let progress):
+                Text(tr("English 모델 설치 중", "Installing English model"))
+                    .font(.system(size: 12, weight: .semibold))
+                ProgressView(value: progress)
+                    .frame(width: 180)
+                Text("\(Int(progress * 100))%")
+                    .monospacedDigit()
+                    .captionStyle(.secondary)
+            case .failed(let message):
+                Text(tr("English 모델 설치 실패", "English model installation failed"))
+                    .font(.system(size: 12, weight: .semibold))
+                Text(message)
+                    .captionStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+                Button(tr("재시도", "Retry")) {
+                    Task { await recorder.installModel(.english) }
+                }
+                .buttonStyle(.bordered)
+            case .notInstalled:
+                Text(tr("녹취하려면 English 모델이 필요합니다.",
+                         "The English model is required to record."))
+                    .font(.system(size: 12))
+                Button(tr("설치", "Install")) {
+                    Task { await recorder.installModel(.english) }
+                }
+                .buttonStyle(.bordered)
+            case .installed:
+                EmptyView()
+            }
+        }
     }
 
     private func errorPane(_ failure: MeetingRecorder.Failure) -> some View {

@@ -230,13 +230,13 @@ final class TranscriptStoreTests: XCTestCase {
     func test_markdown_linksSavedAudioFiles() async throws {
         let store = try makeStore()
         await store.append(segment(.me, "발화", 0, 1))
-        let audio = await store.sessionDirectory.appending(path: "me.m4a")
+        let audio = await store.sessionDirectory.appending(path: "meeting.m4a")
 
         let directory = await store.finalize(audioFiles: [audio])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
-        XCTAssertTrue(markdown.contains("me.m4a"), "원본 오디오 링크가 없다")
+        XCTAssertTrue(markdown.contains("meeting.m4a"), "회의 음성 링크가 없다")
     }
 
     func test_markdown_withNoSegments_stillProducesFile() async throws {

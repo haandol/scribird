@@ -68,8 +68,7 @@ actor TranscriptStore {
 
     /// 세션을 닫고 사람이 읽을 Markdown 회의록을 함께 남긴다.
     ///
-    /// - Parameter audioFiles: 함께 저장된 원본 오디오 경로. 회의록 머리말에
-    ///   링크로 적어 두면 나중에 원본을 되짚기 쉽다.
+    /// - Parameter audioFiles: 함께 저장된 회의 음성 경로.
     func finalize(audioFiles: [URL]) -> URL {
         try? handle?.close()
         handle = nil
@@ -90,7 +89,7 @@ actor TranscriptStore {
         var lines = ["# Meeting Transcript — \(header)", ""]
 
         if !audioFiles.isEmpty {
-            lines.append("Original audio: " + audioFiles.map { url in
+            lines.append("Meeting audio: " + audioFiles.map { url in
                 let name = url.lastPathComponent
                 let label = Speaker(rawValue: url.deletingPathExtension().lastPathComponent)?
                     .archiveName ?? name

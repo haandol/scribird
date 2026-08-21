@@ -12,6 +12,7 @@ final class SettingsWindow {
     private let recorder: MeetingRecorder
     private let hotKeySettings: HotKeySettings
     private let settingsHotKeySettings: SettingsHotKeySettings
+    private let microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings
     private let updateChecker: UpdateChecker
     private let languageSettings: AppLanguageSettings
 
@@ -19,12 +20,14 @@ final class SettingsWindow {
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
         settingsHotKeySettings: SettingsHotKeySettings,
+        microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings,
         updateChecker: UpdateChecker,
         languageSettings: AppLanguageSettings
     ) {
         self.recorder = recorder
         self.hotKeySettings = hotKeySettings
         self.settingsHotKeySettings = settingsHotKeySettings
+        self.microphoneMuteHotKeySettings = microphoneMuteHotKeySettings
         self.updateChecker = updateChecker
         self.languageSettings = languageSettings
     }
@@ -88,6 +91,7 @@ final class SettingsWindow {
                 recorder: recorder,
                 hotKeySettings: hotKeySettings,
                 settingsHotKeySettings: settingsHotKeySettings,
+                microphoneMuteHotKeySettings: microphoneMuteHotKeySettings,
                 updateChecker: updateChecker,
                 languageSettings: languageSettings
             )

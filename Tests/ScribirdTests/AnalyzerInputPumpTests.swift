@@ -223,6 +223,107 @@ final class AnalyzerInputPumpTests: XCTestCase {
                        "인터리브 배치에서 신호를 놓쳤다 — 시스템 오디오가 무음으로 오진된다")
     }
 
+    // MARK: - 마이크 음소거
+
+    func test_mutedSubmit_yieldsSilenceWithContinuousTimeline() async {
+        let pump = pump()
+        let stream = pump.makeInputStream()
+        let format = captureFormat()
+
+        pump.submit(buffer(format, frames: 4800, amplitude: 0.5))
+        pump.setMuted(true)
+        pump.submit(buffer(format, frames: 4800, amplitude: 0.8))
+        pump.setMuted(false)
+        pump.submit(buffer(format, frames: 4800, amplitude: 0.5))
+
+        let received = await collect(stream, count: 3)
+
+        XCTAssertEqual(received.count, 3)
+        XCTAssertGreaterThan(received[0].buffer.peakAmplitude(), 0.1)
+        XCTAssertEqual(received[1].buffer.peakAmplitude(), 0, accuracy: 0.0001,
+                       "음소거 구간의 마이크 신호가 전사 버퍼에 남았다")
+        XCTAssertGreaterThan(received[2].buffer.peakAmplitude(), 0.1)
+        XCTAssertGreaterThan(
+            received[2].bufferStartTime?.seconds ?? 0,
+            received[1].bufferStartTime?.seconds ?? 0,
+            "음소거 중 시간축이 멈추면 시스템 오디오와 발화 시각이 어긋난다"
+        )
+    }
+
+    func test_mutedSubmit_hidesMicrophoneLevelUntilNewAudioArrives() {
+        let pump = pump()
+        _ = pump.makeInputStream()
+        let format = captureFormat()
+
+        pump.submit(buffer(format, frames: 4800, amplitude: 0.7))
+        XCTAssertGreaterThan(pump.level.recentLevel, 0)
+
+        pump.setMuted(true)
+        pump.submit(buffer(format, frames: 4800, amplitude: 0.9))
+
+        XCTAssertEqual(pump.level.recentLevel, 0,
+                       "음소거 중 이전 마이크 데시벨 잔상이 남았다")
+        XCTAssertEqual(pump.peakLevel, 0.7, accuracy: 0.01,
+                       "음소거된 실제 음성이 진단용 피크에 들어갔다")
+    }
+
+    func test_mutingMicrophonePump_doesNotMuteSystemAudioPump() async {
+        let microphone = pump(speaker: .me)
+        let systemAudio = pump(speaker: .remote)
+        let microphoneStream = microphone.makeInputStream()
+        let systemAudioStream = systemAudio.makeInputStream()
+        let format = captureFormat()
+
+        microphone.setMuted(true)
+        microphone.submit(buffer(format, frames: 4800, amplitude: 0.8))
+        systemAudio.submit(buffer(format, frames: 4800, amplitude: 0.6))
+
+        let microphoneInputs = await collect(microphoneStream, count: 1)
+        let systemAudioInputs = await collect(systemAudioStream, count: 1)
+
+        XCTAssertEqual(microphoneInputs[0].buffer.peakAmplitude(), 0, accuracy: 0.0001)
+        XCTAssertGreaterThan(systemAudioInputs[0].buffer.peakAmplitude(), 0.1,
+                             "마이크 음소거가 시스템 오디오 전사까지 막았다")
+        XCTAssertEqual(systemAudio.peakLevel, 0.6, accuracy: 0.01,
+                       "마이크 음소거가 시스템 오디오 미터까지 지웠다")
+    }
+
+    func test_mutedSubmit_excludesMicrophoneFromMeetingArchive() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "scribird-muted-pump-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let recorder = AudioRecorder(directory: directory)
+        let pump = AnalyzerInputPump(
+            speaker: .me,
+            targetFormat: targetFormat,
+            audioRecorder: recorder
+        )
+        _ = pump.makeInputStream()
+        pump.setMuted(true)
+
+        let format = captureFormat(channels: 1, interleaved: false)
+        for _ in 0..<10 {
+            pump.submit(buffer(format, frames: 4800, amplitude: 0.8))
+        }
+
+        let url = try XCTUnwrap(recorder.finish().first)
+        let file = try AVAudioFile(forReading: url)
+        let decoded = try XCTUnwrap(
+            AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: AVAudioFrameCount(file.length)
+            )
+        )
+        try file.read(into: decoded)
+
+        XCTAssertGreaterThan(decoded.frameLength, 0,
+                             "음소거 구간 길이가 meeting.m4a에서 사라졌다")
+        XCTAssertLessThan(decoded.peakAmplitude(), SilenceCriteria.threshold,
+                          "음소거된 마이크 내용이 meeting.m4a에 남았다")
+    }
+
     // MARK: - 경계 조건
 
     func test_submit_ignoresEmptyBuffer() {

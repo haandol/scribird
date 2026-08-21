@@ -98,6 +98,10 @@ final class MicrophoneCapture: CaptureSource, @unchecked Sendable {
     /// 세션 전체 최대 진폭. 0에 가까우면 권한 거부를 의심한다.
     var peakLevel: Float { pump.peakLevel }
 
+    func setMuted(_ muted: Bool) {
+        pump.setMuted(muted)
+    }
+
     func start() throws {
         let input = engine.inputNode
 
@@ -120,8 +124,12 @@ final class MicrophoneCapture: CaptureSource, @unchecked Sendable {
 
         // 변환기는 첫 버퍼의 실제 포맷으로 만든다. 탭이 선언한 포맷과 콜백이
         // 실어 오는 포맷이 어긋날 수 있고, 장치 전환으로 도중에 바뀌기도 한다.
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            self?.pump.submit(buffer)
+        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) {
+            [weak self] buffer, time in
+            self?.pump.submit(
+                buffer,
+                hostTime: time.isHostTimeValid ? time.hostTime : nil
+            )
         }
 
         engine.prepare()

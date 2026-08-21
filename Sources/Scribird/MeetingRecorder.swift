@@ -58,6 +58,11 @@ final class MeetingRecorder {
     private(set) var state: State = .idle
     private(set) var segments: [TranscriptSegment] = []
     private(set) var startedAt: Date?
+    let modelManager: SpeechModelManager
+
+    init(modelManager: SpeechModelManager = SpeechModelManager()) {
+        self.modelManager = modelManager
+    }
 
     /// 직전 세션이 저장된 디렉터리. 메뉴에서 "폴더 열기"에 쓴다.
     private(set) var lastSessionDirectory: URL?
@@ -76,14 +81,31 @@ final class MeetingRecorder {
     /// 해석할 수 없게 된다.
     private(set) var language: TranscriptionLanguage = RecordingPreferences.language()
 
-    /// 언어 전환이 모델 다운로드를 기다리는 중이면 그 대상 언어. 아니면 nil이다.
-    ///
-    /// 기다리는 동안에도 전사는 이전 언어로 계속되므로, 사용자가 전환이 이미 반영됐다고
-    /// 오해하지 않게 이 값을 화면에 알린다.
-    private(set) var pendingLanguage: TranscriptionLanguage?
-
     /// 언어를 바꾸지 못한 이유. 다음 전환 시도나 세션 시작에서 지운다.
     private(set) var languageSwitchWarning: String?
+
+    var availableLanguages: [TranscriptionLanguage] {
+        modelManager.availableLanguages
+    }
+
+    var canStartRecording: Bool {
+        modelManager.hasInstalledLanguage
+    }
+
+    func refreshModelAvailability() async {
+        await modelManager.refresh()
+        reconcileLanguageSelection()
+    }
+
+    func installRequiredEnglishIfNeeded() async {
+        await modelManager.installRequiredEnglishIfNeeded()
+        reconcileLanguageSelection()
+    }
+
+    func installModel(_ language: SpeechModelLanguage) async {
+        await modelManager.install(language)
+        reconcileLanguageSelection()
+    }
 
     /// 회의 언어를 고른다. 녹취 중에도 바꿀 수 있다.
     ///
@@ -91,22 +113,24 @@ final class MeetingRecorder {
     /// 이어지고 전사기만 바뀐다. 세 언어 구성의 최적 오디오 포맷이 모두 같으므로(실측:
     /// `16000 Hz, 1ch, Int16, interleaved`) 캡처를 다시 열 이유가 없다.
     ///
-    /// **모델이 미설치면 이전 언어로 전사를 계속하면서 내려받는다.** 전환이 가장 필요한
-    /// 상황이 예상하지 못한 언어를 만난 경우이고, 그럴수록 모델이 없을 가능성이 높다 —
-    /// 거부하면 이 기능이 필요한 곳에서 없는 기능이 된다.
+    /// 미설치 구성은 분석기를 건드리기 전에 거부한다. 모델 설치는 설정이 소유하고,
+    /// 이 선택기는 실제로 사용할 수 있는 구성만 보여준다.
     func chooseLanguage(_ next: TranscriptionLanguage) async {
-        // 고른 값은 먼저 저장한다. 이번 세션에 반영하지 못해도 사용자의 선택은 남아야 한다.
-        RecordingPreferences.save(language: next)
         languageSwitchWarning = nil
+        guard availableLanguages.contains(next) else {
+            languageSwitchWarning = tr(
+                "\(next.displayName) 모델이 설치되어 있지 않습니다. 설정에서 먼저 설치해 주세요.",
+                "The \(next.displayName) model isn't installed. Install it in settings first."
+            )
+            return
+        }
 
         guard state == .recording else {
-            // 녹취 중이 아니면 다음 시작이 이 값을 읽는다.
-            pendingLanguage = nil
+            RecordingPreferences.save(language: next)
             language = next
             return
         }
         guard next != language else {
-            pendingLanguage = nil
             return
         }
         await switchLanguageWhileRecording(to: next)
@@ -114,7 +138,7 @@ final class MeetingRecorder {
 
     /// 녹취 중에 전사 언어를 갈아 끼운다.
     ///
-    /// 순서가 규칙이다 — **모델 설치 확인 → (필요하면) 다운로드 → 전사기 교체 → 중재기 조정.**
+    /// 순서가 규칙이다 — **모델 설치 확인 → 전사기 교체 → 중재기 조정.**
     /// 미설치 로케일을 살아 있는 분석기에 넣으면 그 분석기가 회복 불가능하게 죽으므로(실측:
     /// 교체가 던진 뒤에도 모듈 목록이 오염되고, 되돌리는 교체는 성공을 반환하면서 복구하지
     /// 못했으며, 멀쩡했던 기존 로케일의 결과 스트림까지 닫혀 진행 중 발화가 사라졌다) 확인이
@@ -124,25 +148,16 @@ final class MeetingRecorder {
         do {
             let locales = try await SpeechModelInstaller.resolveLocales(next.locales)
 
-            if await !SpeechModelInstaller.areInstalled(locales: locales) {
-                // 이전 언어로 전사를 계속하면서 내려받는다. 여기서 상태를 .preparingModel로
-                // 바꾸지 않는다 — 그 상태는 캡처가 아직 없는 시작 단계의 것이고, 녹취 중에
-                // 쓰면 화면이 트랜스크립트를 감춘다.
-                pendingLanguage = next
-                try await SpeechModelInstaller.ensureModels(
-                    for: next.locales.map(SpeechModelInstaller.transcriberModule(for:))
-                ) { _ in }
-                // 다운로드 중에 녹취가 끝났거나 사용자가 또 바꿨으면 여기서 멈춘다.
-                guard state == .recording, pendingLanguage == next else { return }
+            guard await SpeechModelInstaller.areInstalled(locales: locales) else {
+                throw RecorderError.languageModelNotInstalled(next)
             }
 
             try await applyLocales(locales, for: next)
-            pendingLanguage = nil
             language = next
+            RecordingPreferences.save(language: next)
         } catch {
             // 전환 실패는 세션을 접지 않는다. 이전 언어가 그대로 동작하고 있으므로 녹취는
             // 계속되고, 사용자에게는 화면에 보이는 언어가 실제 동작 중인 것으로 남는다.
-            pendingLanguage = nil
             language = previous
             languageSwitchWarning = tr(
                 "회의 언어를 \(next.displayName)로 바꾸지 못해 \(previous.displayName)로 계속 기록합니다: \(error.localizedDescription)",
@@ -195,7 +210,7 @@ final class MeetingRecorder {
         }
     }
 
-    /// 원본 오디오를 소스별 파일로 남길지. 껐다 켜기를 UI에서 노출한다.
+    /// 회의 음성 합본을 남길지. 껐다 켜기를 UI에서 노출한다.
     var savesAudio = RecordingPreferences.savesAudio() {
         didSet {
             guard savesAudio != oldValue else { return }
@@ -224,7 +239,14 @@ final class MeetingRecorder {
     ///
     /// 고른 폴더를 쓸 수 없는 상태에서는 되돌아갈 기본 위치를 가리킨다 — 표시된 위치와 실제
     /// 저장 위치가 갈라지면 사용자가 회의록을 엉뚱한 곳에서 찾는다.
-    var transcriptRootDirectory: URL? { TranscriptRootLocation.resolve()?.directory }
+    var transcriptRootDirectory: URL? {
+#if DEBUG
+        if let documentationTranscriptRootDirectory {
+            return documentationTranscriptRootDirectory
+        }
+#endif
+        return TranscriptRootLocation.resolve()?.directory
+    }
 
     /// 사용자가 고른 저장 루트. nil이면 앱이 정한 기본 위치를 쓴다.
     ///
@@ -259,6 +281,13 @@ final class MeetingRecorder {
 
     /// 이번 세션에서 실제로 살아 있는 소스. 권한이 없어 못 켠 소스는 빠진다.
     private(set) var activeSources: Set<Speaker> = []
+    /// 앱 안에서 마이크 입력만 의도적으로 막은 상태.
+    private(set) var microphoneMuted = false
+#if DEBUG
+    /// 문서 스냅샷에서 실제 오디오 장치 없이 미터를 채우는 값.
+    private var documentationInputLevels: [Speaker: InputLevel]?
+    private var documentationTranscriptRootDirectory: URL?
+#endif
     /// 일부 소스만 켜졌을 때 사용자에게 알릴 사유.
     private(set) var sourceWarning: String?
 
@@ -321,6 +350,7 @@ final class MeetingRecorder {
     /// 시험해도 결과가 동일했으므로 구성 문제가 아니라 권한 문제다. 반환값만
     /// 믿으면 "정상 녹음 중"으로 보이므로, 진폭을 근거로 따로 판정해야 한다.
     func isSilent(_ speaker: Speaker) -> Bool {
+        if speaker == .me, microphoneMuted { return false }
         guard let capture = capture(for: speaker) else { return false }
         // 시작 직후에는 아직 소리가 없을 수 있으니 유예 시간을 준다.
         guard let startedAt,
@@ -337,6 +367,7 @@ final class MeetingRecorder {
     ///
     /// 전사는 이 레벨에서도 되므로 오류가 아니라 안내로 다룬다.
     var microphoneIsTooQuiet: Bool {
+        guard !microphoneMuted else { return false }
         guard let capture = capture(for: .me) else { return false }
         guard capture.level.hasEnoughSamples else { return false }
         // 음성 녹음 권장 RMS는 -24~-18 dBFS다. -30보다 낮으면 알린다.
@@ -348,8 +379,29 @@ final class MeetingRecorder {
     /// `@Observable`은 오디오 콜백이 갱신하는 값을 추적할 수 없다(메인 액터 밖에서
     /// 초당 수십 번 바뀐다). 그래서 UI가 `TimelineView`로 주기적으로 당겨 읽는다.
     func inputLevel(for speaker: Speaker) -> InputLevel? {
+        if speaker == .me, microphoneMuted { return nil }
+#if DEBUG
+        if let level = documentationInputLevels?[speaker] { return level }
+#endif
         guard let capture = capture(for: speaker) else { return nil }
         return InputLevel(meter: capture.level.meterValue, decibels: capture.level.decibels)
+    }
+
+    /// 마이크 내용만 전사·원본 저장에서 제외한다.
+    ///
+    /// 시스템 출력 캡처에는 손대지 않는다. 마이크 장치와 전사 스트림도 유지해 두 소스의
+    /// 시간축이 계속 맞도록 하고, 입력 펌프가 같은 길이의 무음으로 치환한다.
+    var canToggleMicrophoneMute: Bool {
+        state == .recording && activeSources.contains(.me)
+    }
+
+    func toggleMicrophoneMute() {
+        guard canToggleMicrophoneMute,
+              let microphone = captures[.me] as? MicrophoneCapture
+        else { return }
+
+        microphoneMuted.toggle()
+        microphone.setMuted(microphoneMuted)
     }
 
     /// 살아 있는 소스의 캡처. 켜지지 않은 소스는 nil이다.
@@ -394,17 +446,20 @@ final class MeetingRecorder {
         timeline.reset()
         segments = []
         activeSources = []
+        microphoneMuted = false
         sourceWarning = nil
         modelRetentionWarning = nil
         rootFallbackWarning = nil
         languageSwitchWarning = nil
-        // 지난 세션이 다운로드를 기다리다 끝났을 수 있다. 이번 시작은 저장된 값을 그대로
-        // 읽으므로 기다림의 흔적을 남기지 않는다.
-        pendingLanguage = nil
-        language = RecordingPreferences.language()
         sessionTimeOffset = 0
 
         do {
+            await modelManager.refresh()
+            reconcileLanguageSelection()
+            guard modelManager.hasInstalledLanguage else {
+                throw RecorderError.noInstalledLanguageModels
+            }
+
             let provisioned = try await provisionSessions()
             let audioFormat = provisioned.audioFormat
             // 켜지지 못한 소스의 세션을 아래에서 덜어내므로 변경 가능해야 한다.
@@ -490,10 +545,7 @@ final class MeetingRecorder {
 
     /// 언어 모델을 확보하고 소스별 전사 세션을 준비한다.
     ///
-    /// **순서가 규칙이다.** 예약 → 설치 → 오디오 포맷 질의 → 분석기 준비. 모델이 하나라도
-    /// 미설치면 최적 포맷 질의가 nil을 돌려주므로 설치보다 먼저 물으면 캡처를 열 포맷을 정할
-    /// 수 없다. 예약을 설치보다 먼저 하는 것은 내려받은 모델이 곧 정리되지 않게 붙잡기
-    /// 위해서다.
+    /// **순서가 규칙이다.** 설치 확인 → 예약 → 오디오 포맷 질의 → 분석기 준비.
     ///
     /// - Returns: 소스별 전사 세션과, 두 세션이 공통으로 받아들일 캡처 포맷.
     private func provisionSessions() async throws -> (
@@ -501,6 +553,9 @@ final class MeetingRecorder {
         audioFormat: AVAudioFormat
     ) {
         let locales = try await SpeechModelInstaller.resolveLocales(language.locales)
+        guard await SpeechModelInstaller.areInstalled(locales: locales) else {
+            throw RecorderError.languageModelNotInstalled(language)
+        }
 
         // 세션을 먼저 만든다. 필요한 에셋과 최적 오디오 포맷을 알아내려면
         // 실제 모듈 인스턴스가 있어야 한다.
@@ -511,13 +566,6 @@ final class MeetingRecorder {
 
         let modules = await sessions[.me]!.modules
         try await reserveModels(locales: locales, modules: modules)
-
-        try await SpeechModelInstaller.ensureModels(for: modules) { [weak self] fraction in
-            Task { @MainActor [weak self] in
-                guard let self, case .preparingModel = self.state else { return }
-                self.state = .preparingModel(fraction)
-            }
-        }
 
         // 모델이 하나라도 미설치면 여기서 nil이 나온다. 설치 이후에 물어야 한다.
         guard let audioFormat = await TranscriptionSession.bestAudioFormat(for: modules) else {
@@ -720,8 +768,8 @@ final class MeetingRecorder {
         await drainPendingUtterances(into: store)
         segments = timeline.displaySegments
 
-        let storageError = audioRecorder?.storageError
         let audioFiles = audioRecorder?.finish() ?? []
+        let storageError = audioRecorder?.storageError
         lastSessionDirectory = await store?.finalize(audioFiles: audioFiles)
         await teardown()
 
@@ -732,15 +780,15 @@ final class MeetingRecorder {
             using: folderOpener
         )
 
-        // 전사는 성공했지만 원본 저장이 실패한 경우. 회의록은 이미 남았으니
+        // 전사는 성공했지만 회의 음성 저장이 실패한 경우. 회의록은 이미 남았으니
         // 실패로 뭉개지 말고 저장 실패만 알린다.
         if let storageError {
             // 설정 창을 싣지 않는다 — 디스크 쓰기 실패는 권한 설정으로 고칠 수 없으므로
             // 보내면 아무것도 할 수 없는 화면을 열게 된다.
             state = .failed(
                 Failure(tr(
-                    "회의록은 저장했지만 음성 원본 저장에 실패했습니다: \(storageError.localizedDescription)",
-                    "The transcript was saved but the original audio failed to save: \(storageError.localizedDescription)"
+                    "회의록은 저장했지만 회의 음성 저장에 실패했습니다: \(storageError.localizedDescription)",
+                    "The transcript was saved but the meeting audio failed to save: \(storageError.localizedDescription)"
                 ))
             )
         } else {
@@ -893,6 +941,7 @@ final class MeetingRecorder {
         // 이 소스만 접는다. 다른 소스의 항목은 표에 그대로 남아 계속 흐른다.
         captures.removeValue(forKey: speaker)?.stop()
         activeSources.remove(speaker)
+        if speaker == .me { microphoneMuted = false }
 
         let label = speaker.captureLabel
         guard activeSources.isEmpty else {
@@ -1075,8 +1124,7 @@ final class MeetingRecorder {
         currentSessionDirectory = nil
         sessionRoot = nil
         sessionTimeOffset = 0
-        // 기다리던 전환은 이 세션의 것이었다. 다음 세션은 저장된 값을 처음부터 쓴다.
-        pendingLanguage = nil
+        microphoneMuted = false
         if !reservedLocales.isEmpty {
             await SpeechModelInstaller.release(locales: reservedLocales)
             reservedLocales = []
@@ -1102,6 +1150,8 @@ final class MeetingRecorder {
 
     enum RecorderError: LocalizedError {
         case noCompatibleAudioFormat
+        case noInstalledLanguageModels
+        case languageModelNotInstalled(TranscriptionLanguage)
         /// 고른 폴더도 기본 위치도 쓸 수 없다. 되돌릴 곳조차 없는 경우다.
         case noWritableTranscriptRoot
 
@@ -1110,10 +1160,65 @@ final class MeetingRecorder {
             case .noCompatibleAudioFormat:
                 tr("전사 모델과 호환되는 오디오 포맷을 찾지 못했습니다.",
                    "Couldn't find an audio format compatible with the transcription model.")
+            case .noInstalledLanguageModels:
+                tr("필수 English 모델이 설치되어 있지 않습니다. 설정에서 설치 상태를 확인해 주세요.",
+                   "The required English model isn't installed. Check its installation status in settings.")
+            case .languageModelNotInstalled(let language):
+                tr("\(language.displayName) 모델이 설치되어 있지 않습니다. 설정에서 먼저 설치해 주세요.",
+                   "The \(language.displayName) model isn't installed. Install it in settings first.")
             case .noWritableTranscriptRoot:
                 tr("회의록을 저장할 폴더를 열 수 없습니다. 설정에서 저장 위치를 확인해 주세요.",
                    "Couldn't open a folder to save the transcript. Check the save location in settings.")
             }
         }
     }
+
+    private func reconcileLanguageSelection() {
+        let available = modelManager.availableLanguages
+        guard !available.isEmpty else { return }
+        let preferred = RecordingPreferences.language()
+        let resolved = available.contains(preferred) ? preferred : available[0]
+        guard state != .recording else { return }
+        language = resolved
+        if resolved != preferred {
+            RecordingPreferences.save(language: resolved)
+        }
+    }
+
+#if DEBUG
+    /// README 이미지는 실제 회의 내용을 쓰지 않고도 운영 UI를 그대로 렌더링한다.
+    func configureDocumentationSnapshot(
+        segments: [TranscriptSegment],
+        language: TranscriptionLanguage = .english,
+        recording: Bool = true
+    ) {
+        state = recording ? .recording : .idle
+        startedAt = recording ? Date().addingTimeInterval(-8 * 60 - 42) : nil
+        self.segments = segments
+        self.language = language
+        activeSources = recording ? Set(Speaker.allCases) : []
+        microphoneMuted = false
+        sourceWarning = nil
+        modelRetentionWarning = nil
+        rootFallbackWarning = nil
+        languageSwitchWarning = nil
+        savesAudio = true
+        opensFolderOnStop = true
+        let root = URL(
+            filePath: "/Users/demo/Documents/Scribird",
+            directoryHint: .isDirectory
+        )
+        documentationTranscriptRootDirectory = root
+        currentSessionDirectory = recording ? URL(
+            filePath: "/Users/demo/Documents/Scribird/2026-08-21_093000",
+            directoryHint: .isDirectory
+        ) : nil
+        documentationInputLevels = recording
+            ? [
+                .me: InputLevel(meter: 0.68, decibels: -19),
+                .remote: InputLevel(meter: 0.57, decibels: -26),
+            ]
+            : nil
+    }
+#endif
 }

@@ -76,8 +76,9 @@ for this rather than failing, because a half-working session is still worth reco
 
 That is a transcription problem, not a capture problem. Check:
 
-- **The model finished installing.** Pressing Start moves through a *모델 준비 N%* state
-  first. Capture doesn't begin until that gate clears.
+- **The English model finished installing.** It is mandatory and macOS downloads it when the
+  app starts if needed. Settings shows progress and a retry action; recording stays disabled
+  until English is installed.
 - **The language matches.** If the meeting is in Korean but English is selected, recognition
   quality collapses rather than erroring.
 - **Levels are high enough.** Below roughly -50 dBFS the utterance gate never opens. The
@@ -227,7 +228,7 @@ follows the system default:
 ```bash
 defaults read com.scribird.app pinnedOutputDeviceUID   # errors out if not pinned
 ``` Deleting the domain
-resets every setting to its default — 한국어 + English, original-audio saving on, `⌥⌘S`:
+resets every setting to its default — English, meeting-audio saving on, `⌥⌘S`:
 
 ```bash
 defaults delete com.scribird.app
@@ -247,18 +248,15 @@ start.
 
 ### Verify what was actually captured
 
-The per-source `.m4a` files are the ground truth for whether capture worked. Open them
-directly:
+The meeting audio file is the ground truth for whether the archive worked. Open it directly:
 
 ```bash
-open ~/Documents/Scribird/<date_time>/me.m4a
-open ~/Documents/Scribird/<date_time>/remote.m4a
+open ~/Documents/Scribird/<date_time>/meeting.m4a
 ```
 
 A file that plays back silence confirms a capture problem; one that sounds correct while
-`transcript.jsonl` is empty or wrong points at transcription instead. This split is the
-fastest way to decide which half of the pipeline to investigate — and it's the main reason
-originals are kept before resampling.
+`transcript.jsonl` is empty or wrong points at transcription instead. Because the archive is
+a mono mix, use the live per-source meters and warnings to identify which input was missing.
 
 ### Confirm a session boundary worked
 

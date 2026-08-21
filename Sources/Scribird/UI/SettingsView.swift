@@ -15,6 +15,7 @@ struct SettingsView: View {
     let recorder: MeetingRecorder
     let hotKeySettings: HotKeySettings
     let settingsHotKeySettings: SettingsHotKeySettings
+    let microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings
     let updateChecker: UpdateChecker
     let languageSettings: AppLanguageSettings
 
@@ -29,7 +30,7 @@ struct SettingsView: View {
     /// 탭이 이번에 보려는 탭일 이유가 없다. 항상 첫 탭에서 시작한다.
     ///
     /// 이름을 `Tab`으로 두지 않는다 — SwiftUI의 `Tab`을 가려서 탭을 만들 수 없게 된다.
-    private enum Pane: Hashable, CaseIterable {
+    enum Pane: Hashable, CaseIterable {
         case general
         case recording
         case device
@@ -53,7 +54,25 @@ struct SettingsView: View {
 
     /// 「일반」에서 시작한다 — 앱을 처음 만지는 사용자가 화면 언어부터 찾을 수 있어야 하고,
     /// macOS 앱의 설정 창이 그 탭에서 열리는 것이 관례다.
-    @State private var pane: Pane = .general
+    @State private var pane: Pane
+
+    init(
+        recorder: MeetingRecorder,
+        hotKeySettings: HotKeySettings,
+        settingsHotKeySettings: SettingsHotKeySettings,
+        microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings,
+        updateChecker: UpdateChecker,
+        languageSettings: AppLanguageSettings,
+        initialPane: Pane = .general
+    ) {
+        self.recorder = recorder
+        self.hotKeySettings = hotKeySettings
+        self.settingsHotKeySettings = settingsHotKeySettings
+        self.microphoneMuteHotKeySettings = microphoneMuteHotKeySettings
+        self.updateChecker = updateChecker
+        self.languageSettings = languageSettings
+        _pane = State(initialValue: initialPane)
+    }
 
     var body: some View {
         TabView(selection: $pane) {
@@ -126,6 +145,20 @@ struct SettingsView: View {
                              "This combination opens settings while the transcript window is in front. If another app has claimed it globally, that app wins — pick a different combination then."))
                         .captionStyle(.secondary)
                 }
+
+                LabeledContent(tr("마이크 음소거 토글", "Toggle microphone mute")) {
+                    ShortcutField(settings: microphoneMuteHotKeySettings)
+                }
+                if let error = microphoneMuteHotKeySettings.validationError {
+                    Label(error, systemImage: "keyboard.badge.exclamationmark")
+                        .captionStyle(.orange)
+                } else {
+                    Text(tr(
+                        "Scribird가 앞에 있고 녹취 중일 때 이 조합으로 내 마이크만 음소거하거나 해제합니다.",
+                        "While Scribird is in front and recording, this combination mutes or unmutes only your microphone."
+                    ))
+                    .captionStyle(.secondary)
+                }
             }
 
             Section(tr("버전", "Version")) {
@@ -138,7 +171,7 @@ struct SettingsView: View {
 
     // MARK: - 녹취 탭
 
-    /// **녹취하면 무엇이 어디에 남는가**를 정하는 것들 — 인식 언어, 음성 원본을 남길지, 산출물이
+    /// **녹취하면 무엇이 어디에 남는가**를 정하는 것들 — 인식 언어, 회의 음성을 남길지, 산출물이
     /// 갈 폴더, 끝났을 때 그 폴더를 열지.
     ///
     /// 이 탭의 항목은 녹취 중 잠기는 것과 그렇지 않은 것이 섞여 있으므로, 각 섹션이 자기 잠금
@@ -146,53 +179,54 @@ struct SettingsView: View {
     private var recordingTab: some View {
         Form {
             Section(tr("전사", "Transcription")) {
-                // 녹취 중에도 바꿀 수 있다. 전환은 캡처와 원본 오디오를 끊지 않고 전사기만
+                // 녹취 중에도 바꿀 수 있다. 전환은 캡처와 회의 음성을 끊지 않고 전사기만
                 // 갈아 끼우므로, 언어가 틀렸다는 것을 회의 중에 발견해도 고칠 수 있다.
                 Picker(tr("회의 언어", "Meeting language"), selection: Binding(
-                    get: { recorder.pendingLanguage ?? recorder.language },
+                    get: { recorder.language },
                     set: { next in Task { await recorder.chooseLanguage(next) } }
                 )) {
-                    ForEach(TranscriptionLanguage.allCases) { language in
+                    ForEach(recorder.availableLanguages) { language in
                         Text(language.displayName).tag(language)
                     }
                 }
-                // 모델 확보 중에는 캡처가 아직 없어 전환할 대상도 없다.
-                .disabled(recorder.isPreparingModel)
+                .disabled(recorder.availableLanguages.isEmpty || recorder.isPreparingModel)
 
-                if let pending = recorder.pendingLanguage {
-                    // 기다리는 동안 전사는 이전 언어로 계속된다 — 알리지 않으면 사용자가
-                    // 전환이 이미 반영됐다고 오해한다.
-                    Text(tr("\(pending.displayName) 모델을 내려받는 중입니다. 그동안 \(recorder.language.displayName)로 계속 기록합니다.",
-                             "Downloading the \(pending.displayName) model. Recording continues in \(recorder.language.displayName) until it's ready."))
-                        .captionStyle(.secondary)
+                if recorder.availableLanguages.isEmpty {
+                    Text(tr("필수 English 모델이 설치되면 회의 언어를 선택할 수 있습니다.",
+                             "Meeting languages become available after the required English model is installed."))
+                        .captionStyle(.orange)
                 } else if recorder.state == .recording {
                     Text(tr("녹취 중에도 바꿀 수 있습니다. 소리와 회의록은 끊기지 않습니다.",
                              "Can be changed while recording — the audio and transcript are not interrupted."))
                         .captionStyle(.secondary)
                 }
+
+                ForEach(SpeechModelLanguage.allCases) { language in
+                    speechModelRow(language)
+                }
             }
 
             Section(tr("산출물", "Output")) {
-                // 원본을 남길지가 저장 위치와 같은 섹션에 있는 이유는 둘 다 산출물의 구성을
+                // 음성을 남길지가 저장 위치와 같은 섹션에 있는 이유는 둘 다 산출물의 구성을
                 // 정하기 때문이다. "무엇을 남길까"와 "어디에 남길까"를 떼어 놓으면 한 결정을
                 // 두 자리에서 하게 된다.
-                Toggle(tr("음성 원본 저장", "Save original audio"), isOn: Binding(
+                Toggle(tr("회의 음성 저장", "Save meeting audio"), isOn: Binding(
                     get: { recorder.savesAudio },
                     set: { recorder.savesAudio = $0 }
                 ))
                 .disabled(recorder.state.isBusy)
 
                 Text(recorder.savesAudio
-                    ? tr("회의록과 함께 소스별 음성 원본을 남깁니다. 나중에 다시 전사할 수 있습니다.",
-                         "Keeps per-source original audio alongside the transcript, so you can re-transcribe later.")
-                    : tr("회의록만 남기고 음성 원본은 저장하지 않습니다.",
-                         "Keeps only the transcript — no original audio is saved."))
+                    ? tr("마이크와 시스템 소리를 모노 합본으로 남깁니다. 나중에 다시 전사할 수 있습니다.",
+                         "Keeps microphone and system audio in one mono file for later re-transcription.")
+                    : tr("회의록만 남기고 회의 음성은 저장하지 않습니다.",
+                         "Keeps only the transcript — no meeting audio is saved."))
                     .captionStyle(.secondary)
 
                 transcriptRootRow
 
                 // 이 항목은 녹취 중에도 잠그지 않는다. 종료 시점에만 읽히는 값이라 이미
-                // 만들어진 전사기나 열려 있는 파일과 어긋나지 않는다 — 언어·원본 저장을
+                // 만들어진 전사기나 열려 있는 파일과 어긋나지 않는다 — 언어·음성 저장을
                 // 잠그는 근거가 여기엔 없다.
                 Toggle(tr("녹취를 끝내면 저장 폴더 열기", "Open the save folder when recording stops"), isOn: Binding(
                     get: { recorder.opensFolderOnStop },
@@ -208,6 +242,61 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .task {
+            await recorder.refreshModelAvailability()
+        }
+    }
+
+    @ViewBuilder
+    private func speechModelRow(_ language: SpeechModelLanguage) -> some View {
+        let state = recorder.modelManager.state(for: language)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(language.displayName)
+                Spacer()
+                speechModelStatus(state)
+
+                switch state {
+                case .notInstalled:
+                    Button(tr("설치", "Install")) {
+                        Task { await recorder.installModel(language) }
+                    }
+                case .failed:
+                    Button(tr("재시도", "Retry")) {
+                        Task { await recorder.installModel(language) }
+                    }
+                case .installing, .installed:
+                    EmptyView()
+                }
+            }
+
+            if case .failed(let message) = state {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .captionStyle(.orange)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func speechModelStatus(_ state: SpeechModelManager.State) -> some View {
+        switch state {
+        case .notInstalled:
+            Text(tr("미설치", "Not installed"))
+                .captionStyle(.secondary)
+        case .installing:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(tr("다운로드 중", "Downloading"))
+                    .captionStyle(.secondary)
+            }
+        case .installed:
+            Label(tr("설치됨", "Installed"), systemImage: "checkmark.circle.fill")
+                .captionStyle(.green)
+        case .failed:
+            Text(tr("실패", "Failed"))
+                .captionStyle(.orange)
+        }
     }
 
     // MARK: - 장치 탭
@@ -309,8 +398,8 @@ struct SettingsView: View {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = tr("선택", "Choose")
-        panel.message = tr("회의록과 음성 원본을 저장할 폴더를 고르세요.",
-                           "Choose a folder for transcripts and original audio.")
+        panel.message = tr("회의록과 회의 음성을 저장할 폴더를 고르세요.",
+                           "Choose a folder for transcripts and meeting audio.")
         panel.directoryURL = recorder.transcriptRootDirectory
         guard panel.runModal() == .OK, let url = panel.url else { return }
         applyRoot(url)

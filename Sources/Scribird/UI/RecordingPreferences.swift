@@ -21,9 +21,8 @@ enum RecordingPreferences {
 
     /// 사용자가 아무것도 정하지 않았을 때의 언어 구성.
     ///
-    /// 두 언어를 함께 인식하는 쪽이 기본이다 — 어느 언어로 진행될지 모르는 회의에서
-    /// 한쪽만 켜 두면 다른 언어 발화가 통째로 빠진다.
-    static let defaultLanguage: TranscriptionLanguage = .auto
+    /// English는 앱이 항상 확보하는 필수 기본 모델이다.
+    static let defaultLanguage: TranscriptionLanguage = .english
     /// 원본 저장의 기본값. 재전사 여지를 남기는 쪽을 기본으로 둔다.
     static let defaultSavesAudio = true
     /// 종료 시 저장 폴더를 여는 기본값. 회의 직후는 산출물을 확인하는 시점이므로 켬이다.

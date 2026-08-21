@@ -23,13 +23,45 @@ struct ScribirdApp: App {
                 openSettings: { delegate.windows.showSettings() }
             )
         } label: {
-            Image(
-                systemName: delegate.recorder.state == .recording
-                    ? "waveform.circle.fill"
-                    : "waveform.circle"
-            )
+            menuBarIcon
         }
         .menuBarExtraStyle(.window)
+    }
+
+    @ViewBuilder
+    private var menuBarIcon: some View {
+        let appearance = MenuBarRecordingAppearance(state: delegate.recorder.state)
+        if appearance.highlightsRecording {
+            Image(nsImage: MenuBarRecordingAppearance.recordingImage())
+                .accessibilityLabel(tr("녹취 중", "Recording"))
+        } else {
+            Image(systemName: appearance.symbolName)
+                .accessibilityLabel(tr("Scribird 대기 중", "Scribird idle"))
+        }
+    }
+}
+
+struct MenuBarRecordingAppearance: Equatable {
+    let symbolName: String
+    let highlightsRecording: Bool
+
+    init(state: MeetingRecorder.State) {
+        highlightsRecording = state == .recording
+        symbolName = highlightsRecording ? "waveform.circle.fill" : "waveform.circle"
+    }
+
+    static func recordingImage() -> NSImage {
+        let symbol = NSImage(
+            systemSymbolName: "waveform.circle.fill",
+            accessibilityDescription: tr("녹취 중", "Recording")
+        ) ?? NSImage()
+        let configuration = NSImage.SymbolConfiguration(
+            paletteColors: [.white, .systemRed]
+        )
+        let image = symbol.withSymbolConfiguration(configuration) ?? symbol
+        image.isTemplate = false
+        image.size = NSSize(width: 18, height: 18)
+        return image
     }
 }
 
@@ -42,19 +74,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let recorder = MeetingRecorder()
     let hotKeySettings = HotKeySettings()
     let settingsHotKeySettings = SettingsHotKeySettings()
+    let microphoneMuteHotKeySettings = MicrophoneMuteHotKeySettings()
     let updateChecker = UpdateChecker()
     let languageSettings = AppLanguageSettings()
+    private var microphoneMuteMonitor: Any?
     lazy var windows = WindowCoordinator(
         recorder: recorder,
         hotKeySettings: hotKeySettings,
         settingsHotKeySettings: settingsHotKeySettings,
+        microphoneMuteHotKeySettings: microphoneMuteHotKeySettings,
         updateChecker: updateChecker,
         languageSettings: languageSettings
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        microphoneMuteHotKeySettings.setConflictProvider {
+            [weak hotKeySettings, weak settingsHotKeySettings] in
+            [hotKeySettings?.shortcut, settingsHotKeySettings?.shortcut].compactMap { $0 }
+        }
         // 사용자가 메뉴바를 열지 않아도 단축키가 준비돼 있어야 한다.
         windows.activateHotKey()
+        microphoneMuteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak recorder, weak microphoneMuteHotKeySettings] event in
+            guard microphoneMuteHotKeySettings?.matches(event) == true,
+                  recorder?.canToggleMicrophoneMute == true
+            else { return event }
+            recorder?.toggleMicrophoneMute()
+            return nil
+        }
+        Task { await recorder.installRequiredEnglishIfNeeded() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let microphoneMuteMonitor {
+            NSEvent.removeMonitor(microphoneMuteMonitor)
+        }
     }
 }
 
@@ -72,6 +126,7 @@ final class WindowCoordinator {
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
         settingsHotKeySettings: SettingsHotKeySettings,
+        microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings,
         updateChecker: UpdateChecker,
         languageSettings: AppLanguageSettings
     ) {
@@ -80,6 +135,7 @@ final class WindowCoordinator {
             recorder: recorder,
             hotKeySettings: hotKeySettings,
             settingsHotKeySettings: settingsHotKeySettings,
+            microphoneMuteHotKeySettings: microphoneMuteHotKeySettings,
             updateChecker: updateChecker,
             languageSettings: languageSettings
         )

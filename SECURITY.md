@@ -21,10 +21,10 @@ Scribird holds microphone and system-audio capture permission and writes meeting
 disk, so the interesting failures are about that content escaping or those permissions being
 borrowed. In particular:
 
-- **Meeting data leaving the device.** The app makes exactly one network request — the
-  release lookup behind *새 버전 확인*, and only on that button press. Anything that causes a
-  request the user did not initiate, or that attaches app-produced data (transcript text,
-  usage counts, a device identifier) to that request, is a vulnerability, not a feature
+- **Meeting data leaving the device.** macOS may download the mandatory English Speech asset
+  at app launch, and Korean only after an install action in settings. The release lookup
+  still runs only from *새 버전 확인*. Anything that attaches app-produced data (audio,
+  transcript text, usage counts, or a device identifier) to any request is a vulnerability
   request.
 - **Escalating the permissions Scribird already holds.** The app requests microphone and
   audio capture, and deliberately never requests screen recording or accessibility. A path
@@ -40,8 +40,8 @@ borrowed. In particular:
 ## What is not in scope
 
 - **App Sandbox being disabled.** This is a deliberate, documented decision — it is needed for
-  Core Audio process taps and for writing under `~/Documents`. See
-  [`docs/adr/capture/0001-system-audio-process-tap.md`](./docs/adr/capture/0001-system-audio-process-tap.md).
+  Core Audio process taps and for writing under `~/Documents`. The repository's ADR index
+  records the permission boundary and alternatives.
 - **Builds not being notarized.** Releases are ad-hoc distributed and Gatekeeper will warn on
   first launch. This is stated in the README and is not a vulnerability report; build from
   source if it matters to you.

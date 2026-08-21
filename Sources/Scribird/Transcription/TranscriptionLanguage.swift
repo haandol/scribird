@@ -35,6 +35,17 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable, Sendable {
     /// 언어가 둘 이상이면 결과 중재가 필요하다.
     var needsArbitration: Bool { locales.count > 1 }
 
+    /// 설치된 로케일로 실제 구성할 수 있는 회의 언어만 돌려준다.
+    static func available(installedIdentifiers: [String]) -> [TranscriptionLanguage] {
+        let preferredOrder: [TranscriptionLanguage] = [.english, .korean, .auto]
+        return preferredOrder.filter {
+            SpeechModelInstaller.allInstalled(
+                requested: $0.locales,
+                installedIdentifiers: installedIdentifiers
+            )
+        }
+    }
+
     /// 한 구성에서 다른 구성으로 옮길 때 실제로 바뀌는 로케일.
     ///
     /// **양쪽에 다 있는 로케일은 어디에도 넣지 않는다.** 그 전사기를 그대로 두는 것이

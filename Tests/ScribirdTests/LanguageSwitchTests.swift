@@ -176,11 +176,8 @@ final class LanguageSwitchTests: XCTestCase {
 
     // MARK: - 저장된 선택
 
-    /// **전환에 실패해도 사용자가 고른 값은 저장돼 있어야 한다.**
-    ///
-    /// 이번 세션에 반영하지 못한 것과 선택을 잃는 것은 다르다 — 다음 세션이 그 값을 읽어야
-    /// 사용자가 같은 선택을 두 번 하지 않는다.
-    func test_chosenLanguageSurvivesEvenWhenTheSwitchCannotApply() {
+    /// 설치된 언어로 확정한 선택은 다음 실행에서도 유지돼야 한다.
+    func test_savedInstalledLanguage_isRestored() {
         let defaults = UserDefaults(suiteName: "scribird-language-switch-\(UUID().uuidString)")!
         RecordingPreferences.save(language: .english, to: defaults)
         XCTAssertEqual(RecordingPreferences.language(from: defaults), .english)

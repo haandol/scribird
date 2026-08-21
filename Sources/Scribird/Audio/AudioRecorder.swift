@@ -1,221 +1,324 @@
 import AVFoundation
+import AudioToolbox
 import Foundation
 
-/// 캡처된 오디오 원본을 소스별 파일로 남긴다.
+/// 두 캡처 소스를 녹음 중 공통 시간축의 모노 파일 하나로 합성한다.
 ///
-/// 소스를 섞지 않고 `me.m4a` / `remote.m4a`로 따로 저장하는 이유:
-/// 나중에 다른 STT로 다시 돌리거나 화자분리 모델을 붙일 때 화자 정보가
-/// 보존된 상태로 재사용할 수 있다. 섞어 버리면 그 정보가 영구히 사라진다.
-///
-/// 전사 파이프라인과 같은 버퍼를 공유하되 별도 큐에서 쓴다. 디스크 I/O가
-/// 캡처 콜백을 막으면 오디오가 드롭되기 때문이다.
+/// 캡처 콜백에서는 버퍼를 복사해 전용 큐로 넘기기만 한다. 장치별 포맷 변환,
+/// 타임라인 정렬, 합성, 디스크 쓰기가 전사 입력을 막아서는 안 된다.
 final class AudioRecorder: @unchecked Sendable {
-    /// AAC(.m4a)로 저장한다.
-    ///
-    /// mp3가 아닌 이유: Apple은 mp3 **디코딩**만 지원하고 인코딩은 지원하지 않는다.
-    /// 실측 시 `kAudioFormatMPEGLayer3`로 파일을 만들면 `'fmt?'`
-    /// (kAudioFormatUnsupportedDataFormatError)로 실패한다. mp3로 쓰려면 LAME 같은
-    /// 외부 인코더를 번들에 넣어야 하는데, 의존성 없는 온디바이스 앱이라는 성격에
-    /// 맞지 않는다. AAC는 같은 비트레이트에서 mp3보다 음질이 좋고 OS가 직접 지원한다.
-    private static let fileExtension = "m4a"
+    private static let fileName = "meeting.m4a"
+    private static let sampleRate = 48_000.0
+    private static let bitRate = 128_000
+    private static let blockFrames: Int64 = 960
+    /// 서로 다른 장치의 콜백 도착 순서를 흡수하는 저장 지연이다.
+    private static let reorderFrames: Int64 = 24_000
 
-    /// 채널당 AAC 비트레이트.
-    ///
-    /// 64k가 아니라 128k인 이유: 이 파일의 실제 용도는 재전사다. 64k로 저장한
-    /// 음성을 다시 전사하면 오인식이 생겼다 — `배포 일정` → `대포 일정`.
-    /// 128k와 무손실(ALAC)은 원문과 완전히 일치했다.
-    ///
-    /// 모노 1시간이 약 54MB다. 저장 공간보다 재처리 정확도가 중요하다고 봤다.
-    private static let bitRatePerChannel = 128_000
+    private static let mixFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sampleRate,
+        channels: 1,
+        interleaved: false
+    )!
 
-    /// 소스 하나에 대응하는 출력 파일과 포맷 변환기.
+    private struct SourceConverter {
+        let captureFormat: AVAudioFormat
+        let converter: AudioStreamConverter
+    }
+
     private struct Sink {
         let file: AVAudioFile
-        /// 캡처 포맷과 파일의 `processingFormat`을 잇는 변환기.
-        /// `AVAudioFile.write(from:)`은 `processingFormat`과 정확히 같은 버퍼만
-        /// 받는다. 캡처 포맷은 그와 다를 수 있으므로 반드시 거친다.
         let converter: AudioStreamConverter?
-        let captureFormat: AVAudioFormat
+    }
+
+    private final class MixBlock {
+        var samples = Array(repeating: Float.zero, count: Int(AudioRecorder.blockFrames))
     }
 
     private var directory: URL
-    private let queue = DispatchQueue(label: "com.scribird.recorder.write", qos: .utility)
-    private let lock = NSLock()
-    private var sinks: [Speaker: Sink] = [:]
-    /// 파일 생성이나 변환기 준비에 실패한 소스. 재시도하지 않는다.
-    private var failedSpeakers: Set<Speaker> = []
-    /// 마지막으로 발생한 쓰기 오류. 세션 종료 시 보고한다.
+    private var originHostTime: UInt64
+    private let queue = DispatchQueue(label: "com.scribird.recorder.mix", qos: .utility)
+    private let errorLock = NSLock()
+
+    /// 아래 상태는 모두 `queue`에서만 접근한다.
+    private var sink: Sink?
+    private var sourceConverters: [Speaker: SourceConverter] = [:]
+    private var sourceNextFrame: [Speaker: Int64] = [:]
+    private var pendingBlocks: [Int64: MixBlock] = [:]
+    private var nextWriteBlock: Int64 = 0
+    private var latestEndFrame: Int64 = 0
+    private var failed = false
+
     private var lastError: (any Error)?
 
-    init(directory: URL) {
+    init(
+        directory: URL,
+        originHostTime: UInt64 = AudioGetCurrentHostTime()
+    ) {
         self.directory = directory
+        self.originHostTime = originHostTime
     }
 
-    /// 캡처 콜백에서 호출된다. 논블로킹이어야 하므로 쓰기는 큐에 넘긴다.
-    ///
-    /// - Parameter buffer: 리샘플링 **이전** 원본 버퍼를 넘기는 것이 좋다.
-    ///   16kHz 모노로 줄인 뒤 저장하면 나중에 쓸 수 있는 정보가 줄어든다.
-    func write(_ buffer: AVAudioPCMBuffer, for speaker: Speaker) {
-        // 캡처 콜백이 끝나면 버퍼가 재사용될 수 있으니 복사해서 큐에 넘긴다.
-        // AVAudioPCMBuffer는 Sendable이 아니므로 전용 상자에 담아 소유권을 옮긴다.
+    /// 캡처 콜백에서 호출된다. 변환과 파일 쓰기는 저장 전용 큐에서 수행한다.
+    func write(
+        _ buffer: AVAudioPCMBuffer,
+        for speaker: Speaker,
+        atHostTime hostTime: UInt64? = nil
+    ) {
         guard let copy = buffer.copied() else { return }
         let handoff = OneShotBuffer(copy)
         queue.async { [weak self] in
             guard let self, let buffer = handoff.take() else { return }
-            self.writeSync(buffer, for: speaker)
+            self.writeSync(buffer, for: speaker, atHostTime: hostTime)
         }
     }
 
-    private func writeSync(_ buffer: AVAudioPCMBuffer, for speaker: Speaker) {
-        lock.lock()
-        if failedSpeakers.contains(speaker) {
-            lock.unlock()
-            return
-        }
-        var sink = sinks[speaker]
-        lock.unlock()
+    private func writeSync(
+        _ buffer: AVAudioPCMBuffer,
+        for speaker: Speaker,
+        atHostTime hostTime: UInt64?
+    ) {
+        guard !failed else { return }
 
-        // 캡처 포맷이 바뀌면(입력 장치 전환 등) 변환기를 다시 만들어야 한다.
-        if let existing = sink, existing.captureFormat != buffer.format {
-            sink = Self.remakeConverter(for: existing, captureFormat: buffer.format)
-            if let sink {
-                lock.withLock { sinks[speaker] = sink }
-            } else {
-                lock.withLock { _ = failedSpeakers.insert(speaker) }
-                return
-            }
-        }
-
-        if sink == nil {
-            // 첫 버퍼가 도착한 시점에 그 포맷으로 파일을 만든다. 캡처 포맷을
-            // 미리 알 수 없으므로 지연 생성이 필요하다.
-            do {
-                sink = try makeSink(captureFormat: buffer.format, speaker: speaker)
-            } catch {
-                lock.withLock {
-                    _ = failedSpeakers.insert(speaker)
-                    lastError = error
-                }
-                return
-            }
-            lock.withLock { sinks[speaker] = sink }
-        }
-
-        guard let sink else { return }
-
-        // 파일이 요구하는 포맷으로 맞춘 뒤에 쓴다.
-        let writable: AVAudioPCMBuffer
-        if let converter = sink.converter {
-            guard let converted = converter.convert(buffer) else { return }
-            writable = converted
+        let converter: AudioStreamConverter
+        if let existing = sourceConverters[speaker],
+           existing.captureFormat == buffer.format {
+            converter = existing.converter
         } else {
-            writable = buffer
+            guard let replacement = AudioStreamConverter(
+                from: buffer.format,
+                to: Self.mixFormat
+            ) else {
+                fail(RecorderError.converterUnavailable(
+                    from: buffer.format,
+                    to: Self.mixFormat
+                ))
+                return
+            }
+            sourceConverters[speaker] = SourceConverter(
+                captureFormat: buffer.format,
+                converter: replacement
+            )
+            converter = replacement
         }
 
-        do {
-            try sink.file.write(from: writable)
-        } catch {
-            // 매 버퍼마다 로그를 쏟지 않도록 마지막 오류만 남긴다.
-            lock.withLock { lastError = error }
-        }
+        guard let converted = converter.convert(buffer),
+              let samples = converted.floatChannelData?[0]
+        else { return }
+
+        let startFrame = framePosition(
+            for: speaker,
+            hostTime: hostTime,
+            frameCount: Int64(converted.frameLength)
+        )
+        add(
+            samples: samples,
+            frameCount: Int(converted.frameLength),
+            at: startFrame
+        )
+
+        latestEndFrame = max(latestEndFrame, startFrame + Int64(converted.frameLength))
+        flushBlocks(endingAtOrBefore: latestEndFrame - Self.reorderFrames)
     }
 
-    private func makeSink(captureFormat: AVAudioFormat, speaker: Speaker) throws -> Sink {
-        // 경계에서 디렉터리가 바뀔 수 있으므로 락 안에서 읽는다.
-        let directory = lock.withLock { self.directory }
-        let url = directory.appending(path: "\(speaker.rawValue).\(Self.fileExtension)")
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: captureFormat.sampleRate,
-            AVNumberOfChannelsKey: captureFormat.channelCount,
-            AVEncoderBitRateKey: Self.bitRatePerChannel * Int(captureFormat.channelCount),
-        ]
-        let file = try AVAudioFile(forWriting: url, settings: settings)
-
-        // processingFormat은 보통 Float32 디인터리브드다. 캡처가 Int16
-        // 인터리브드로 오면 그대로 쓰면 -50 오류가 난다.
-        let needsConversion = file.processingFormat != captureFormat
-        let converter = needsConversion
-            ? AudioStreamConverter(from: captureFormat, to: file.processingFormat)
-            : nil
-        if needsConversion, converter == nil {
-            throw RecorderError.converterUnavailable(from: captureFormat, to: file.processingFormat)
+    private func framePosition(
+        for speaker: Speaker,
+        hostTime: UInt64?,
+        frameCount: Int64
+    ) -> Int64 {
+        let start: Int64
+        if let hostTime, hostTime > 0 {
+            let origin = AVAudioTime.seconds(forHostTime: originHostTime)
+            let current = AVAudioTime.seconds(forHostTime: hostTime)
+            start = max(0, Int64(((current - origin) * Self.sampleRate).rounded()))
+        } else {
+            start = sourceNextFrame[speaker] ?? 0
         }
-
-        return Sink(file: file, converter: converter, captureFormat: captureFormat)
+        sourceNextFrame[speaker] = start + frameCount
+        return start
     }
 
-    private static func remakeConverter(for sink: Sink, captureFormat: AVAudioFormat) -> Sink? {
-        guard sink.file.processingFormat != captureFormat else {
-            return Sink(file: sink.file, converter: nil, captureFormat: captureFormat)
-        }
-        guard let converter = AudioStreamConverter(
-            from: captureFormat,
-            to: sink.file.processingFormat
-        ) else { return nil }
-        return Sink(file: sink.file, converter: converter, captureFormat: captureFormat)
-    }
-
-    /// 지금까지의 파일을 마무리하고, 이후 버퍼를 새 디렉터리에 쓰기 시작한다.
-    ///
-    /// 세션 경계에서 쓰인다. 캡처는 끊기지 않으므로 콜백은 계속 들어오는데, 그
-    /// 버퍼가 가야 할 파일만 바뀐다. 실패한 소스 표시와 누적 오류도 함께 비워
-    /// 새 세션이 이전 세션의 실패를 물려받지 않게 한다.
-    ///
-    /// - Returns: 닫힌 세션의 재생 가능한 오디오 파일 경로들.
-    func rotate(to newDirectory: URL) -> [URL] {
-        let finished = finish()
-        lock.withLock {
-            directory = newDirectory
-            failedSpeakers.removeAll()
-            lastError = nil
-        }
-        return finished
-    }
-
-    /// 큐에 남은 쓰기를 모두 끝내고 파일을 닫는다.
-    ///
-    /// - Returns: 실제로 재생 가능한 오디오 파일 경로들.
-    func finish() -> [URL] {
-        // 큐를 동기로 비워 마지막 버퍼까지 디스크에 안착시킨다.
-        queue.sync {}
-
-        let urls: [URL] = lock.withLock {
-            let collected = sinks.values.map(\.file.url)
-            // AVAudioFile은 마지막 참조가 사라질 때 컨테이너를 닫고 moov atom을
-            // 쓴다. 이걸 놓치면 데이터는 있어도 열 수 없는 파일이 남는다.
-            sinks.removeAll()
-            return collected
-        }
-
-        // 실제로 열리는지 확인한다. 여기서 걸러야 "저장했다"는 보고가 정직해진다.
-        var valid: [URL] = []
-        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            if (try? AVAudioFile(forReading: url)) != nil {
-                valid.append(url)
+    private func add(
+        samples: UnsafePointer<Float>,
+        frameCount: Int,
+        at startFrame: Int64
+    ) {
+        for index in 0..<frameCount {
+            let absoluteFrame = startFrame + Int64(index)
+            guard absoluteFrame >= 0 else { continue }
+            let block = absoluteFrame / Self.blockFrames
+            let offset = Int(absoluteFrame % Self.blockFrames)
+            let mixed: MixBlock
+            if let existing = pendingBlocks[block] {
+                mixed = existing
             } else {
-                lock.withLock {
-                    lastError = RecorderError.fileNotFinalized(url.lastPathComponent)
+                let created = MixBlock()
+                pendingBlocks[block] = created
+                mixed = created
+            }
+            mixed.samples[offset] += samples[index]
+        }
+    }
+
+    private func flushBlocks(endingAtOrBefore frame: Int64) {
+        guard frame > 0 else { return }
+        while (nextWriteBlock + 1) * Self.blockFrames <= frame {
+            guard writeBlock(nextWriteBlock) else { return }
+            nextWriteBlock += 1
+        }
+    }
+
+    @discardableResult
+    private func writeBlock(_ blockIndex: Int64) -> Bool {
+        guard !failed else { return false }
+        do {
+            let sink = try ensureSink()
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: Self.mixFormat,
+                frameCapacity: AVAudioFrameCount(Self.blockFrames)
+            ), let output = buffer.floatChannelData?[0]
+            else {
+                throw RecorderError.bufferUnavailable
+            }
+
+            buffer.frameLength = AVAudioFrameCount(Self.blockFrames)
+            let samples = pendingBlocks.removeValue(forKey: blockIndex)?.samples
+                ?? Array(repeating: 0, count: Int(Self.blockFrames))
+            for index in samples.indices {
+                output[index] = min(1, max(-1, samples[index]))
+            }
+
+            let writable: AVAudioPCMBuffer
+            if let converter = sink.converter {
+                guard let converted = converter.convert(buffer) else {
+                    throw RecorderError.converterUnavailable(
+                        from: Self.mixFormat,
+                        to: sink.file.processingFormat
+                    )
                 }
+                writable = converted
+            } else {
+                writable = buffer
+            }
+            try sink.file.write(from: writable)
+            return true
+        } catch {
+            fail(error)
+            return false
+        }
+    }
+
+    private func ensureSink() throws -> Sink {
+        if let sink { return sink }
+
+        let url = directory.appending(path: Self.fileName)
+        let file: AVAudioFile
+        do {
+            file = try Self.makeFile(at: url, lossless: false)
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            file = try Self.makeFile(at: url, lossless: true)
+        }
+
+        let converter = file.processingFormat == Self.mixFormat
+            ? nil
+            : AudioStreamConverter(from: Self.mixFormat, to: file.processingFormat)
+        if file.processingFormat != Self.mixFormat, converter == nil {
+            throw RecorderError.converterUnavailable(
+                from: Self.mixFormat,
+                to: file.processingFormat
+            )
+        }
+
+        let created = Sink(file: file, converter: converter)
+        sink = created
+        return created
+    }
+
+    private static func makeFile(at url: URL, lossless: Bool) throws -> AVAudioFile {
+        var settings: [String: Any] = [
+            AVFormatIDKey: lossless ? kAudioFormatAppleLossless : kAudioFormatMPEG4AAC,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+        ]
+        if !lossless {
+            settings[AVEncoderBitRateKey] = bitRate
+        }
+        return try AVAudioFile(forWriting: url, settings: settings)
+    }
+
+    private func fail(_ error: any Error) {
+        failed = true
+        pendingBlocks.removeAll()
+        errorLock.withLock { lastError = error }
+    }
+
+    /// 현재 세션 파일을 닫은 뒤 같은 캡처 스트림을 새 세션 파일로 이어 쓴다.
+    func rotate(to newDirectory: URL) -> [URL] {
+        queue.sync {
+            let finished = finishSync()
+            directory = newDirectory
+            originHostTime = AudioGetCurrentHostTime()
+            resetForNextSession()
+            return finished
+        }
+    }
+
+    /// 큐에 남은 합성과 쓰기를 끝내고 재생 가능한 파일만 반환한다.
+    func finish() -> [URL] {
+        queue.sync { finishSync() }
+    }
+
+    private func finishSync() -> [URL] {
+        if !failed, latestEndFrame > 0 {
+            let finalBlock = (latestEndFrame + Self.blockFrames - 1) / Self.blockFrames
+            while nextWriteBlock < finalBlock {
+                guard writeBlock(nextWriteBlock) else { break }
+                nextWriteBlock += 1
             }
         }
-        return valid
+
+        let url = sink?.file.url
+        sink = nil
+        guard let url else { return [] }
+
+        guard (try? AVAudioFile(forReading: url)) != nil else {
+            errorLock.withLock {
+                lastError = RecorderError.fileNotFinalized(url.lastPathComponent)
+            }
+            return []
+        }
+        return [url]
     }
 
-    /// 세션 중 발생한 마지막 저장 오류. UI에서 경고를 띄우는 데 쓴다.
+    private func resetForNextSession() {
+        sink = nil
+        sourceConverters.removeAll()
+        sourceNextFrame.removeAll()
+        pendingBlocks.removeAll()
+        nextWriteBlock = 0
+        latestEndFrame = 0
+        failed = false
+        errorLock.withLock { lastError = nil }
+    }
+
     var storageError: (any Error)? {
-        lock.withLock { lastError }
+        errorLock.withLock { lastError }
     }
 
     enum RecorderError: LocalizedError {
         case converterUnavailable(from: AVAudioFormat, to: AVAudioFormat)
+        case bufferUnavailable
         case fileNotFinalized(String)
 
         var errorDescription: String? {
             switch self {
             case .converterUnavailable:
-                tr("오디오 원본을 저장할 형식으로 변환할 수 없습니다.",
-                   "Couldn't convert the original audio into a format that can be saved.")
+                tr("회의 음성을 저장할 형식으로 변환할 수 없습니다.",
+                   "Couldn't convert the meeting audio into a format that can be saved.")
+            case .bufferUnavailable:
+                tr("회의 음성을 합성할 버퍼를 만들 수 없습니다.",
+                   "Couldn't create a buffer for the meeting audio mix.")
             case .fileNotFinalized(let name):
                 tr("\(name)을 재생 가능한 파일로 마무리하지 못했습니다.",
                    "Couldn't finalize \(name) into a playable file.")
@@ -225,6 +328,29 @@ final class AudioRecorder: @unchecked Sendable {
 }
 
 extension AVAudioPCMBuffer {
+    /// 같은 포맷·같은 길이의 무음 버퍼를 만든다.
+    func silentCopy() -> AVAudioPCMBuffer? {
+        guard frameLength > 0,
+              let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength)
+        else { return nil }
+        copy.frameLength = frameLength
+
+        let source = UnsafeMutableAudioBufferListPointer(mutableAudioBufferList)
+        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        guard source.count == destination.count else { return nil }
+
+        for index in 0..<source.count {
+            guard let destinationData = destination[index].mData else { return nil }
+            let byteCount = min(
+                Int(source[index].mDataByteSize),
+                Int(destination[index].mDataByteSize)
+            )
+            memset(destinationData, 0, byteCount)
+            destination[index].mDataByteSize = UInt32(byteCount)
+        }
+        return copy
+    }
+
     /// 같은 포맷·같은 내용의 독립 버퍼를 만든다.
     func copied() -> AVAudioPCMBuffer? {
         guard frameLength > 0,

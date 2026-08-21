@@ -42,6 +42,13 @@ final class AudioLevelTracker: @unchecked Sendable {
         }
     }
 
+    /// 의도적으로 입력을 숨길 때 미터의 잔상만 지운다.
+    ///
+    /// 세션 피크와 발화 평균은 권한·녹음 품질 진단의 누적 근거이므로 유지한다.
+    func clearRecent() {
+        lock.withLock { recent = 0 }
+    }
+
     /// 발화 구간의 평균 진폭.
     ///
     /// 레벨이 적정한지는 피크보다 이 값이 잘 말해준다. 실측 예에서 피크는

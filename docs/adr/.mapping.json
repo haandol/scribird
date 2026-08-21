@@ -7,27 +7,27 @@
       "adrs": [
         {
           "path": "docs/adr/capture/0001-system-audio-process-tap.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-08-21)",
           "summary": "시스템 출력은 Core Audio Process Tap으로 받아 화면 녹화 권한을 요구하지 않는다"
         },
         {
           "path": "docs/adr/capture/0002-silent-capture-detection.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-08-21)",
           "summary": "캡처 API가 권한 없이도 성공을 반환하므로 성공 여부를 버퍼 진폭으로 판정한다"
         },
         {
           "path": "docs/adr/capture/0003-per-source-failure-isolation.md",
-          "status": "Proposed",
-          "summary": "두 소스를 독립적으로 시작하고 둘 다 실패할 때만 세션을 접는다"
+          "status": "Accepted (2026-08-21)",
+          "summary": "두 소스를 독립적으로 유지하고 설정 가능한 로컬 단축키(기본 ⌘Y) 또는 버튼으로 마이크만 음소거한다"
         },
         {
           "path": "docs/adr/capture/0004-input-level-diagnostics.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-08-21)",
           "summary": "레벨을 미터·무음판정·발화평균 세 값으로 나눠 추적하고 원본에 게인 보정을 하지 않는다"
         },
         {
           "path": "docs/adr/capture/0005-capture-device-change-follow.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-08-21)",
           "summary": "캡처 장치는 시스템 기본을 따라가고 사용자가 고르면 그 장치에 고정한다 (세션은 끊지 않음)"
         }
       ],
@@ -49,13 +49,13 @@
         },
         {
           "path": "docs/adr/transcription/0003-model-provisioning-gate.md",
-          "status": "Proposed",
-          "summary": "모델 설치가 끝난 뒤 오디오 포맷을 확정하고 캡처를 시작한다 (예약 실패는 잔여 예약 회수 후 재시도하고, 모델이 설치돼 있으면 경고로 강등)"
+          "status": "Accepted (2026-08-21)",
+          "summary": "필수 English 모델은 앱 시작 시 자동 설치하고 한국어는 설정에서 관리하며 0% 준비는 기다리고 양수 진행률의 30초 정체나 부분 완료는 실패로 끝낸다"
         },
         {
           "path": "docs/adr/transcription/0004-in-session-language-switch.md",
-          "status": "Proposed",
-          "summary": "회의 언어를 녹취 중에도 바꾸고 캡처·원본 오디오·회의록을 끊지 않는다 (미설치 언어는 기존 언어로 전사하며 내려받고, 실패 시 기존 언어 유지)"
+          "status": "Accepted (2026-08-21)",
+          "summary": "설치된 회의 언어만 녹취 중 전환하고 캡처·회의 음성·회의록은 끊지 않으며 English는 필수 기본 모델로 유지한다"
         }
       ],
       "dependsOn": [
@@ -122,7 +122,7 @@
         {
           "path": "docs/adr/archive/0002-original-audio-format.md",
           "status": "Proposed",
-          "summary": "원본을 소스별로 리샘플링 전 AAC 128k로 저장한다 (64k는 재전사 오인식 발생)"
+          "summary": "회의 중 두 캡처를 공통 시간축의 모노 meeting.m4a 하나로 합성하고 별도 소스 파일은 만들지 않는다"
         },
         {
           "path": "docs/adr/archive/0003-session-output-discoverability.md",
