@@ -424,11 +424,11 @@ static func transcribe(
     let session = TranscriptionSession(speaker: speaker, locales: resolved)
     let modules = await session.modules
 
-    try await SpeechModelInstaller.reserve(locales: resolved)
+    try await SpeechModelInstaller.ensureModels(for: modules)
+    let reservation = await SpeechModelInstaller.reserve(locales: resolved)
     defer {
-        Task { await SpeechModelInstaller.release(locales: resolved) }
+        Task { await SpeechModelInstaller.release(locales: reservation.reserved) }
     }
-    try await SpeechModelInstaller.ensureModels(for: modules) { _ in }
 
     let bestFormat = await TranscriptionSession.bestAudioFormat(for: modules)
     let format = try XCTUnwrap(bestFormat, "모델 설치 후에도 오디오 포맷을 얻지 못했다")

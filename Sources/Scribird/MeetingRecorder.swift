@@ -580,9 +580,9 @@ final class MeetingRecorder {
 
     /// 언어 모델을 붙잡아 둔다. 실패해도 모델이 설치돼 있으면 경고로 강등한다.
     ///
-    /// 예약을 먼저 해야 다운로드한 모델이 정리되지 않는다. 실제로 잡힌 것만 해제 대상으로
-    /// 남긴다 — 예약하지 않은 로케일을 해제하면 false가 돌아올 뿐이지만(실측), 잡힌 로케일이
-    /// 목록에서 빠지면 그대로 붙잡힌 채 남아 다음 실행의 한도를 잠식한다.
+    /// 설치가 끝난 모델만 세션 동안 예약한다. 실제로 잡힌 것만 해제 대상으로 남긴다 —
+    /// 예약하지 않은 로케일을 해제하면 false가 돌아올 뿐이지만(실측), 잡힌 로케일이 목록에서
+    /// 빠지면 그대로 붙잡힌 채 남아 다음 실행의 한도를 잠식한다.
     private func reserveModels(locales: [Locale], modules: [any SpeechModule]) async throws {
         let reservation = await SpeechModelInstaller.reserve(locales: locales)
         reservedLocales = reservation.reserved

@@ -175,10 +175,7 @@ private actor DocumentationSpeechModelInstaller: SpeechModelInstalling {
         installed
     }
 
-    func install(
-        _ language: SpeechModelLanguage,
-        onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    func install(_ language: SpeechModelLanguage) async throws {
         XCTFail("Documentation screenshots must not install speech models.")
     }
 }

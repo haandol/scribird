@@ -50,7 +50,7 @@
         {
           "path": "docs/adr/transcription/0003-model-provisioning-gate.md",
           "status": "Accepted (2026-08-21)",
-          "summary": "필수 English 모델은 앱 시작 시 자동 설치하고 한국어는 설정에서 관리하며 0% 준비는 기다리고 양수 진행률의 30초 정체나 부분 완료는 실패로 끝낸다"
+          "summary": "필수 English 모델은 앱 시작 시 자동 설치하고 한국어는 설정에서 관리하며 설치 요청은 예약·진행률 취소와 분리하고 최종 설치 목록으로 성공을 판정한다"
         },
         {
           "path": "docs/adr/transcription/0004-in-session-language-switch.md",

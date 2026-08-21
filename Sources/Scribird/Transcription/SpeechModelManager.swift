@@ -24,10 +24,7 @@ enum SpeechModelLanguage: String, CaseIterable, Identifiable, Sendable {
 
 protocol SpeechModelInstalling: Sendable {
     func installedLocaleIdentifiers() async -> [String]
-    func install(
-        _ language: SpeechModelLanguage,
-        onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws
+    func install(_ language: SpeechModelLanguage) async throws
 }
 
 struct SystemSpeechModelInstaller: SpeechModelInstalling {
@@ -35,14 +32,8 @@ struct SystemSpeechModelInstaller: SpeechModelInstalling {
         await SpeechModelInstaller.installedLocaleIdentifiers()
     }
 
-    func install(
-        _ language: SpeechModelLanguage,
-        onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws {
-        try await SpeechModelInstaller.install(
-            locale: language.locale,
-            onProgress: onProgress
-        )
+    func install(_ language: SpeechModelLanguage) async throws {
+        try await SpeechModelInstaller.install(locale: language.locale)
     }
 }
 
@@ -51,7 +42,7 @@ struct SystemSpeechModelInstaller: SpeechModelInstalling {
 final class SpeechModelManager {
     enum State: Equatable {
         case notInstalled
-        case installing(Double)
+        case installing
         case installed
         case failed(String)
 
@@ -100,23 +91,14 @@ final class SpeechModelManager {
 
     func install(_ language: SpeechModelLanguage) async {
         guard !state(for: language).isInstalling else { return }
-        states[language] = .installing(0)
+        states[language] = .installing
 
         do {
-            try await installer.install(language) { [weak self] fraction in
-                Task { @MainActor [weak self] in
-                    guard let self, self.state(for: language).isInstalling else { return }
-                    self.states[language] = .installing(min(max(fraction, 0), 1))
-                }
-            }
+            try await installer.install(language)
 
             let installed = normalizedSet(await installer.installedLocaleIdentifiers())
             guard installed.contains(normalized(language.locale.identifier)) else {
-                let progress = currentProgress(for: language)
-                throw SpeechModelInstaller.InstallError.incompleteInstallation(
-                    language.locale,
-                    progress: progress
-                )
+                throw SpeechModelInstaller.InstallError.incompleteInstallation(language.locale)
             }
             states[language] = .installed
         } catch {
@@ -139,13 +121,6 @@ final class SpeechModelManager {
             if case .installed = state(for: $0) { return true }
             return false
         }
-    }
-
-    private func currentProgress(for language: SpeechModelLanguage) -> Double {
-        if case .installing(let fraction) = state(for: language) {
-            return fraction
-        }
-        return 0
     }
 
     private func normalizedSet(_ identifiers: [String]) -> Set<String> {

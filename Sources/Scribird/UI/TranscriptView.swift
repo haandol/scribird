@@ -434,14 +434,11 @@ struct TranscriptView: View {
                 .foregroundStyle(.secondary)
 
             switch state {
-            case .installing(let progress):
+            case .installing:
                 Text(tr("English 모델 설치 중", "Installing English model"))
                     .font(.system(size: 12, weight: .semibold))
-                ProgressView(value: progress)
+                ProgressView()
                     .frame(width: 180)
-                Text("\(Int(progress * 100))%")
-                    .monospacedDigit()
-                    .captionStyle(.secondary)
             case .failed(let message):
                 Text(tr("English 모델 설치 실패", "English model installation failed"))
                     .font(.system(size: 12, weight: .semibold))

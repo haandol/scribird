@@ -32,8 +32,7 @@ enum SpeechModelInstaller {
     enum InstallError: LocalizedError {
         case localeUnsupported(Locale)
         case installationUnavailable(Locale)
-        case installationStalled(Locale, progress: Double)
-        case incompleteInstallation(Locale, progress: Double)
+        case incompleteInstallation(Locale)
         /// 예약에 실패했고 모델도 미설치라 다운로드를 붙잡을 수 없는 경우.
         ///
         /// 진단 상태를 함께 들고 다닌다. 실패 원인을 버리고 한도 초과로 단정한 예전 문구가
@@ -54,15 +53,10 @@ enum SpeechModelInstaller {
             case .installationUnavailable(let locale):
                 tr("\(locale.identifier) 언어 모델 설치 요청을 만들 수 없습니다.",
                    "Couldn't create an installation request for the \(locale.identifier) language model.")
-            case .installationStalled(let locale, let progress):
+            case .incompleteInstallation(let locale):
                 tr(
-                    "\(locale.identifier) 언어 모델 설치가 \(Int(progress * 100))%에서 30초 동안 진행되지 않아 중단했습니다. 다시 시도해 주세요.",
-                    "The \(locale.identifier) language model stayed at \(Int(progress * 100))% for 30 seconds, so installation was stopped. Try again."
-                )
-            case .incompleteInstallation(let locale, let progress):
-                tr(
-                    "\(locale.identifier) 언어 모델의 일부 에셋만 준비됐습니다 (\(Int(progress * 100))%). 다시 시도해 주세요.",
-                    "Only some assets for the \(locale.identifier) language model are ready (\(Int(progress * 100))%). Try again."
+                    "\(locale.identifier) 언어 모델 설치 요청이 끝났지만 모델을 확인하지 못했습니다. 다시 시도해 주세요.",
+                    "The \(locale.identifier) language model request finished, but the model wasn't installed. Try again."
                 )
             case .reservationFailed(let locale, let reason, let requested, let reserved):
                 tr(
@@ -249,183 +243,40 @@ enum SpeechModelInstaller {
         await AssetInventory.reservedLocales
     }
 
-    struct InstallProgressWatchdog {
-        static let stallInterval: TimeInterval = 30
-
-        private(set) var progress: Double
-        private var hasStarted: Bool
-        private var lastChangedAt: TimeInterval?
-
-        init(progress: Double, at time: TimeInterval) {
-            self.progress = progress
-            self.hasStarted = progress > 0.000_001
-            self.lastChangedAt = hasStarted ? time : nil
-        }
-
-        mutating func observe(_ next: Double, at time: TimeInterval) -> Bool {
-            if abs(next - progress) > 0.000_001 {
-                progress = next
-                if next > 0.000_001 {
-                    hasStarted = true
-                }
-                if hasStarted {
-                    lastChangedAt = time
-                }
-            }
-            // macOS는 실제 전송 전에 자산 구성을 바꾸고 기존 작업을 접어 새 요청을
-            // 대기열에 넣는 동안에도 0%를 보고한다. 이 준비 시간을 정체로 세면
-            // 다운로드가 시작되기 전에 앱이 스스로 구독을 해제한다.
-            guard hasStarted, let lastChangedAt else { return false }
-            return time - lastChangedAt >= Self.stallInterval
-        }
-    }
-
-    static func install(
-        locale requestedLocale: Locale,
-        onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    static func install(locale requestedLocale: Locale) async throws {
         let locale = try await resolveLocale(requestedLocale)
         if await areInstalled(locales: [locale]) {
-            onProgress(1)
             return
         }
 
-        let reservation = await reserve(locales: [locale])
-        guard reservation.isComplete else {
-            let failure = reservation.unreserved[0]
-            throw InstallError.reservationFailed(
-                locale: failure.locale,
-                reason: failure.reason,
-                requested: [locale],
-                reserved: await reservedLocales()
-            )
-        }
-
-        do {
-            let module = transcriberModule(for: locale)
-            try await installModules(
-                [module],
-                locale: locale,
-                onProgress: onProgress
-            )
-            await release(locales: reservation.reserved)
-        } catch {
-            await release(locales: reservation.reserved)
-            throw error
-        }
+        let module = transcriberModule(for: locale)
+        try await installModules([module], locale: locale)
     }
 
     private static func installModules(
         _ modules: [any SpeechModule],
-        locale: Locale,
-        onProgress: @escaping @Sendable (Double) -> Void
+        locale: Locale
     ) async throws {
         let status = await AssetInventory.status(forModules: modules)
-        guard status != .installed else {
-            onProgress(1)
-            return
-        }
+        guard status != .installed else { return }
 
         guard let request = try await AssetInventory.assetInstallationRequest(supporting: modules)
         else {
             throw InstallError.installationUnavailable(locale)
         }
 
-        let progress = request.progress
-        defer { progress.cancel() }
-        try await firstCompleted(
-            request: {
-                try await request.downloadAndInstall()
-                guard await AssetInventory.status(forModules: modules) == .installed else {
-                    throw InstallError.incompleteInstallation(
-                        locale,
-                        progress: progress.fractionCompleted
-                    )
-                }
-            },
-            monitor: {
-                var watchdog = InstallProgressWatchdog(
-                    progress: progress.fractionCompleted,
-                    at: ProcessInfo.processInfo.systemUptime
-                )
-                onProgress(watchdog.progress)
-
-                while !Task.isCancelled {
-                    try await Task.sleep(for: .seconds(1))
-                    let fraction = progress.fractionCompleted
-                    onProgress(fraction)
-
-                    let state = await AssetInventory.status(forModules: modules)
-                    if state == .installed {
-                        return
-                    }
-                    if state != .downloading, fraction > 0 {
-                        throw InstallError.incompleteInstallation(
-                            locale,
-                            progress: fraction
-                        )
-                    }
-                    if watchdog.observe(
-                        fraction,
-                        at: ProcessInfo.processInfo.systemUptime
-                    ) {
-                        progress.cancel()
-                        throw InstallError.installationStalled(
-                            locale,
-                            progress: fraction
-                        )
-                    }
-                }
-            }
-        )
-        onProgress(1)
-    }
-
-    /// 둘 중 먼저 끝난 결과만 기다린다. 늦은 작업이 취소를 무시해도 호출자를 붙잡지 않는다.
-    static func firstCompleted(
-        request: @escaping @Sendable () async throws -> Void,
-        monitor: @escaping @Sendable () async throws -> Void
-    ) async throws {
-        let (results, continuation) = AsyncThrowingStream<Void, any Error>.makeStream(
-            bufferingPolicy: .bufferingNewest(1)
-        )
-        let requestTask = Task {
-            do {
-                try await request()
-                continuation.yield(())
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
+        // Progress 취소는 언어 구독 해제와 설치된 에셋 회수로 이어질 수 있다.
+        try await request.downloadAndInstall()
+        guard await AssetInventory.status(forModules: modules) == .installed else {
+            throw InstallError.incompleteInstallation(locale)
         }
-        let monitorTask = Task {
-            do {
-                try await monitor()
-                continuation.yield(())
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-
-        defer {
-            requestTask.cancel()
-            monitorTask.cancel()
-        }
-
-        var iterator = results.makeAsyncIterator()
-        guard try await iterator.next() != nil else { throw CancellationError() }
     }
 
     /// 테스트 픽스처가 명시적으로 요구한 모듈을 설치할 때 쓴다.
-    static func ensureModels(
-        for modules: [any SpeechModule],
-        onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    static func ensureModels(for modules: [any SpeechModule]) async throws {
         try await installModules(
             modules,
-            locale: Locale(identifier: "und"),
-            onProgress: onProgress
+            locale: Locale(identifier: "und")
         )
     }
 

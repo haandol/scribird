@@ -77,8 +77,8 @@ for this rather than failing, because a half-working session is still worth reco
 That is a transcription problem, not a capture problem. Check:
 
 - **The English model finished installing.** It is mandatory and macOS downloads it when the
-  app starts if needed. Settings shows progress and a retry action; recording stays disabled
-  until English is installed.
+  app starts if needed. Settings shows *Downloading* and a retry action rather than an
+  unreliable percentage; recording stays disabled until English is installed.
 - **The language matches.** If the meeting is in Korean but English is selected, recognition
   quality collapses rather than erroring.
 - **Levels are high enough.** Below roughly -50 dBFS the utterance gate never opens. The
@@ -120,6 +120,45 @@ relaunching is not a fix you should need.
 failure alone does not prevent transcription when the model is already installed, and an
 older version of this app reported "the reservation limit was exceeded" for unrelated
 failures — including on machines holding no reservations at all.
+
+#### A model stays on *Downloading*, or Korean disappeared after working before
+
+Scribird 0.1.8 and later treats installation and model reservation as separate operations.
+It waits for the macOS installation request and verifies the final installed-locale list;
+it does not cancel the request because the reported percentage stopped changing.
+
+Older builds could cancel a stalled-looking `Progress` object. On macOS 26.6.1 that
+cancellation unsubscribed `transcription.ko`, reduced the active Speech asset set from
+English + Korean + metadata to English + metadata, and removed an already-installed Korean
+model. The measured Korean download was 132,120,576 bytes, with a 170,065,920-byte installed
+footprint.
+
+The same cancellation can leave MobileAsset with a pending set job. The UI then says
+*Downloading*, but system logs show zero transferred bytes and a request queued behind a
+job that is still being cancelled. Low disk space may make asset management more aggressive,
+but it was not the direct cause in the measured case: macOS reported
+`filesystemSpaceCritical: N`.
+
+Try this recovery in order:
+
+1. Quit Scribird completely.
+2. Restart the Mac. This is the safest way to restart the system-owned Speech asset services.
+3. If restarting the Mac is impractical, restart only the two root-owned asset daemons:
+
+   ```bash
+   sudo killall mobileassetd
+   sudo killall assetsubscriptiond
+   ```
+
+   `launchd` starts them again automatically. Do not delete anything under
+   `/System/Library/AssetsV2`; that is macOS-owned state shared with other system features.
+4. Open Scribird, go to Settings › Recording, and press **Install** for Korean once. Leave the
+   request running even if no percentage appears.
+
+Installation is complete only when Settings says **Installed** and the meeting-language
+picker adds **Korean** and **Korean + English**. For an advanced check, the installed locale
+list returned by macOS must contain `ko_KR`; the presence of a Korean manifest alone does not
+mean the model is installed.
 
 ### Audio stops being captured mid-meeting
 
