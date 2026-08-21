@@ -12,6 +12,30 @@ distinguishes "recording fine" from "recording silence".
 
 ## Quick fixes — try these first
 
+### macOS says Apple can't verify Scribird and offers only *Move to Trash* or *Done*
+
+The GitHub release build is not notarized. A locally built copy normally opens because it
+originated on your Mac, while a downloaded ZIP carries quarantine metadata and is checked by
+Gatekeeper.
+
+Do not click *Move to Trash*. Verify that the ZIP came from Scribird's official GitHub release
+and that its SHA-256 matches the value in the release notes, then:
+
+1. Move `Scribird.app` to `/Applications` and try to open it once.
+2. Click **Done** in the warning.
+3. Open System Settings › Privacy & Security and scroll down to **Security**.
+4. Click **Open Anyway** next to Scribird.
+5. Authenticate, then click **Open** in the warning that appears again.
+
+The button appears only after macOS has blocked an attempted launch. Once approved, that copy
+of Scribird is saved as an exception and opens normally afterward. If the button is missing,
+try opening `/Applications/Scribird.app` once more and return to Privacy & Security.
+
+Do not work around this by disabling Gatekeeper globally. Removing quarantine metadata with
+`xattr` also bypasses the source check, so it is not the supported installation path.
+Apple documents the same per-app override in
+[Safely open apps on your Mac](https://support.apple.com/102445).
+
 ### 1. Are both level meters moving?
 
 A meter that never moves means that source is not arriving **at all**. That is a permission

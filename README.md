@@ -76,9 +76,21 @@ Download `Scribird-<version>.zip` from the
 `Scribird.app` into `/Applications`.
 
 > [!IMPORTANT]
-> **These builds are not notarized.** Gatekeeper blocks the first launch. Either
-> **right-click the app → Open**, or press *Open Anyway* in System Settings › Privacy &
-> Security. If you would rather not do that dance, build from source below.
+> **These builds are not notarized.** On macOS 26, Gatekeeper can show an alert with only
+> *Move to Trash* and *Done*; right-clicking the app and choosing *Open* may still be blocked.
+> After confirming that the ZIP came from this repository's release page and that its
+> SHA-256 matches the release notes:
+>
+> 1. Move `Scribird.app` to `/Applications` and try to open it once.
+> 2. In the warning, click **Done** — not *Move to Trash*.
+> 3. Open System Settings › Privacy & Security, scroll down to **Security**, and click
+>    **Open Anyway** next to Scribird.
+> 4. Authenticate, then confirm **Open** when macOS asks again.
+>
+> This creates an exception for this copy of Scribird. Do not disable Gatekeeper globally or
+> remove quarantine metadata from an app whose source and checksum you have not verified.
+> See Apple's [guidance for opening an unnotarized app](https://support.apple.com/102445).
+> A build made locally from source does not normally need this override.
 
 ### From source
 
@@ -205,7 +217,8 @@ identifier.
 
 The release lookup behind *Check for updates* fires only from that button
 press. There is no launch or periodic release check. Scribird never downloads an update
-either — it points you at the release page and leaves signature verification to Gatekeeper.
+either — it points you at the release page. Release downloads are not notarized, so follow
+the first-launch steps in [Installation](#from-a-release).
 
 ## Optional: splitting *remote* into individual speakers
 
