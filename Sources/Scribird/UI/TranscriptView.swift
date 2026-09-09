@@ -366,7 +366,7 @@ struct TranscriptView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(recorder.segments) { segment in
-                        SegmentRow(segment: segment)
+                        SegmentRow(segment: segment, language: languageSettings.language)
                             .id(segment.id)
                     }
                     // 자동 스크롤의 목표점. 마지막 세그먼트 id를 쓰면 잠정 결과가
@@ -622,6 +622,9 @@ private struct LevelBar: View {
 /// 발화 한 줄. 화자에 따라 정렬과 색을 바꿔 대화처럼 읽히게 한다.
 private struct SegmentRow: View {
     let segment: TranscriptSegment
+    // 언어를 값으로 넘겨야 이미 확정된 행도 다시 그려진다. 실기 확인에서 전역 값만
+    // 읽던 행은 화면을 영어로 바꿔도 «나 / 상대방»으로 남았다.
+    let language: AppLanguage
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -631,7 +634,7 @@ private struct SegmentRow: View {
                 HStack(spacing: 4) {
                     Image(systemName: segment.speaker.symbol)
                         .font(.system(size: 9))
-                    Text(segment.speaker.displayName)
+                    Text(segment.speaker.displayName(language: language))
                         .font(.system(size: 10, weight: .semibold))
                     // 다국어 회의에서 어느 언어로 인식됐는지 보여준다.
                     if let code = segment.languageCode {
