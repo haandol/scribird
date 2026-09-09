@@ -27,6 +27,19 @@ struct HotKeyShortcut: Equatable, Sendable {
         return !modifiers.intersection(required).isEmpty
     }
 
+    var validationError: String? {
+        isValid ? nil : tr(
+            "Command·Option·Control 중 하나 이상을 포함해야 합니다.",
+            "Must include at least one of Command, Option, or Control."
+        )
+    }
+
+    /// 입력기가 조합 중이어도 같은 물리 키와 수정자를 비교한다.
+    func matches(_ event: NSEvent) -> Bool {
+        event.keyCode == UInt16(keyCode)
+            && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == modifiers
+    }
+
     /// `⌥⌘S` 형태의 표시 문자열.
     var displayName: String {
         var result = ""

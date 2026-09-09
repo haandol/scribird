@@ -23,8 +23,11 @@ final class SettingsHotKeySettings: ShortcutEditing {
     /// 조합을 거부한 사유. 받아들이면 nil이다.
     private(set) var validationError: String?
 
-    init(shortcut: HotKeyShortcut = .load(.settingsWindow)) {
-        self.shortcut = shortcut
+    private let defaults: UserDefaults
+
+    init(shortcut: HotKeyShortcut? = nil, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.shortcut = shortcut ?? .load(.settingsWindow, from: defaults)
     }
 
     /// 이 조합이 설정 열기에 해당하는지. 창이 키 이벤트를 판정할 때 쓴다.
@@ -32,22 +35,19 @@ final class SettingsHotKeySettings: ShortcutEditing {
     /// 키 코드로 비교한다 — 문자로 비교하면 입력기가 조합 중일 때 `charactersIgnoringModifiers`가
     /// 빈 문자열로 와서 놓친다.
     func matches(_ event: NSEvent) -> Bool {
-        event.keyCode == UInt16(shortcut.keyCode)
-            && event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                == shortcut.modifiers
+        shortcut.matches(event)
     }
 
     /// 사용자가 고른 조합으로 바꾼다.
     ///
     /// 전역 등록이 없으므로 실패할 여지는 유효성뿐이다.
     func update(to newShortcut: HotKeyShortcut) {
-        guard newShortcut.isValid else {
-            validationError = tr("Command·Option·Control 중 하나 이상을 포함해야 합니다.",
-                                 "Must include at least one of Command, Option, or Control.")
+        if let error = newShortcut.validationError {
+            validationError = error
             return
         }
         shortcut = newShortcut
-        newShortcut.save(.settingsWindow)
+        newShortcut.save(.settingsWindow, to: defaults)
         validationError = nil
     }
 

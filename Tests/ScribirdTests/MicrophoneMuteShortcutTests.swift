@@ -166,7 +166,8 @@ final class MicrophoneMuteShortcutTests: XCTestCase {
     func test_currentShortcutConflict_disablesMatchingUntilConflictChanges() throws {
         let settings = MicrophoneMuteHotKeySettings(defaults: defaults)
         let other = SettingsHotKeySettings(
-            shortcut: HotKeyShortcut.Slot.microphoneMute.defaultShortcut
+            shortcut: HotKeyShortcut.Slot.microphoneMute.defaultShortcut,
+            defaults: defaults
         )
         settings.setConflictProvider { [other] in [other.shortcut] }
         let event = try keyEvent(

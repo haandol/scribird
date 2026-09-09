@@ -136,7 +136,8 @@ final class SettingsHotKeyTests: XCTestCase {
     @MainActor
     func test_matches_identifiesTheConfiguredCombination() throws {
         let settings = SettingsHotKeySettings(
-            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command])
+            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command]),
+            defaults: defaults
         )
 
         let matching = try XCTUnwrap(Self.keyEvent(
@@ -156,7 +157,8 @@ final class SettingsHotKeyTests: XCTestCase {
     @MainActor
     func test_matches_rejectsDifferentModifiers() throws {
         let settings = SettingsHotKeySettings(
-            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command])
+            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command]),
+            defaults: defaults
         )
 
         for flags: NSEvent.ModifierFlags in [[.command, .shift], [.command, .option], [.option]] {
@@ -172,7 +174,8 @@ final class SettingsHotKeyTests: XCTestCase {
     @MainActor
     func test_matches_followsTheUpdatedShortcut() throws {
         let settings = SettingsHotKeySettings(
-            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command])
+            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command]),
+            defaults: defaults
         )
         let oldCombination = try XCTUnwrap(Self.keyEvent(
             keyCode: UInt16(kVK_ANSI_Comma), flags: .command, characters: ","
@@ -196,7 +199,8 @@ final class SettingsHotKeyTests: XCTestCase {
     @MainActor
     func test_update_rejectsShortcutWithoutModifiers() {
         let settings = SettingsHotKeySettings(
-            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command])
+            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_Comma), modifiers: [.command]),
+            defaults: defaults
         )
         let before = settings.shortcut
 
@@ -212,12 +216,37 @@ final class SettingsHotKeyTests: XCTestCase {
     @MainActor
     func test_resetToDefault_returnsToCommandComma() {
         let settings = SettingsHotKeySettings(
-            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: [.command, .option])
+            shortcut: HotKeyShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: [.command, .option]),
+            defaults: defaults
         )
 
         settings.resetToDefault()
 
         XCTAssertEqual(settings.shortcut, HotKeyShortcut.Slot.settingsWindow.defaultShortcut)
+    }
+
+    @MainActor
+    func test_settingsObjects_useInjectedStorageWithoutOverwritingOtherSlots() {
+        let settings = SettingsHotKeySettings(defaults: defaults)
+        let global = HotKeySettings(defaults: defaults)
+        let localShortcut = HotKeyShortcut(
+            keyCode: UInt32(kVK_ANSI_P), modifiers: [.command, .option]
+        )
+        let globalShortcut = HotKeyShortcut(
+            keyCode: UInt32(kVK_ANSI_T), modifiers: [.control, .option]
+        )
+
+        settings.update(to: localShortcut)
+        global.update(to: globalShortcut)
+
+        XCTAssertEqual(SettingsHotKeySettings(defaults: defaults).shortcut, localShortcut)
+        XCTAssertEqual(HotKeySettings(defaults: defaults).shortcut, globalShortcut)
+        XCTAssertEqual(
+            MicrophoneMuteHotKeySettings(defaults: defaults).shortcut,
+            HotKeyShortcut.Slot.microphoneMute.defaultShortcut
+        )
+        settings.resetToDefault()
+        XCTAssertEqual(HotKeySettings(defaults: defaults).shortcut, globalShortcut)
     }
 
     // MARK: - 헬퍼

@@ -40,15 +40,12 @@ final class MicrophoneMuteHotKeySettings: ShortcutEditing {
         event.type == .keyDown
             && !event.isARepeat
             && conflictMessage(for: shortcut) == nil
-            && event.keyCode == UInt16(shortcut.keyCode)
-            && event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                == shortcut.modifiers
+            && shortcut.matches(event)
     }
 
     func update(to newShortcut: HotKeyShortcut) {
-        guard newShortcut.isValid else {
-            inputError = tr("Command·Option·Control 중 하나 이상을 포함해야 합니다.",
-                            "Must include at least one of Command, Option, or Control.")
+        if let error = newShortcut.validationError {
+            inputError = error
             return
         }
         if let conflict = conflictMessage(for: newShortcut) {

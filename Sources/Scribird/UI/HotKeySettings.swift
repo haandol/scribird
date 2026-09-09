@@ -19,9 +19,11 @@ final class HotKeySettings: ShortcutEditing {
     var isRecording = false
 
     private var hotKey: GlobalHotKey?
+    private let defaults: UserDefaults
 
-    init(shortcut: HotKeyShortcut = .load()) {
-        self.shortcut = shortcut
+    init(shortcut: HotKeyShortcut? = nil, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.shortcut = shortcut ?? .load(from: defaults)
     }
 
     /// 단축키가 눌렸을 때 실행할 동작을 붙이고 등록한다.
@@ -35,9 +37,8 @@ final class HotKeySettings: ShortcutEditing {
     /// 실패하면 이전 조합으로 되돌린다 — 등록되지 않은 조합을 설정으로 남기면
     /// 사용자는 단축키가 바뀐 줄 알지만 아무 조합도 동작하지 않는다.
     func update(to newShortcut: HotKeyShortcut) {
-        guard newShortcut.isValid else {
-            registrationError = tr("Command·Option·Control 중 하나 이상을 포함해야 합니다.",
-                                   "Must include at least one of Command, Option, or Control.")
+        if let error = newShortcut.validationError {
+            registrationError = error
             return
         }
         let previous = shortcut
@@ -55,7 +56,7 @@ final class HotKeySettings: ShortcutEditing {
         do {
             try hotKey?.register(candidate)
             shortcut = candidate
-            candidate.save()
+            candidate.save(to: defaults)
             registrationError = nil
         } catch {
             registrationError = error.localizedDescription
