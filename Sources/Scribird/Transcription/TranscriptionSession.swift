@@ -11,7 +11,7 @@ import Speech
 /// 여러 언어를 다룰 때는 로케일별 `SpeechTranscriber`를 만들어 같은 분석기에
 /// 함께 물린다. 양쪽 모두 결과를 내기 때문에 어느 쪽이 맞는지는 상위 계층의
 /// `LanguageArbiter`가 신뢰도로 판단한다.
-actor TranscriptionSession {
+actor TranscriptionSession: Transcribing {
     private let speaker: Speaker
     private var transcribers: [(locale: Locale, transcriber: SpeechTranscriber)]
     private let analyzer: SpeechAnalyzer

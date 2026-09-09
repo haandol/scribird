@@ -60,8 +60,14 @@ final class MeetingRecorder {
     private(set) var startedAt: Date?
     let modelManager: SpeechModelManager
 
-    init(modelManager: SpeechModelManager = SpeechModelManager()) {
+    private let environment: RecordingEnvironment
+
+    init(
+        modelManager: SpeechModelManager = SpeechModelManager(),
+        environment: RecordingEnvironment = RecordingEnvironment()
+    ) {
         self.modelManager = modelManager
+        self.environment = environment
     }
 
     /// 직전 세션이 저장된 디렉터리. 메뉴에서 "폴더 열기"에 쓴다.
@@ -146,11 +152,7 @@ final class MeetingRecorder {
     private func switchLanguageWhileRecording(to next: TranscriptionLanguage) async {
         let previous = language
         do {
-            let locales = try await SpeechModelInstaller.resolveLocales(next.locales)
-
-            guard await SpeechModelInstaller.areInstalled(locales: locales) else {
-                throw RecorderError.languageModelNotInstalled(next)
-            }
+            let locales = try await environment.speech.installedLocales(for: next)
 
             try await applyLocales(locales, for: next)
             language = next
@@ -192,16 +194,14 @@ final class MeetingRecorder {
         }
 
         for speaker in Speaker.allCases where activeSources.contains(speaker) {
-            guard let session = sessions[speaker] else { continue }
+            guard let session = transcription?.sessions[speaker] else { continue }
             try await session.setLocales(locales)
         }
 
         if next.needsArbitration {
             for speaker in Speaker.allCases where activeSources.contains(speaker) {
                 guard arbiters[speaker] == nil else { continue }
-                arbiters[speaker] = LanguageArbiter { [weak self] segment in
-                    await self?.commit(segment)
-                }
+                arbiters[speaker] = makeArbiter()
             }
         } else {
             // 중재기가 들고 있던 발화는 위 배출에서 이미 기록됐다(로케일이 빠지는 전환이므로
@@ -245,7 +245,7 @@ final class MeetingRecorder {
             return documentationTranscriptRootDirectory
         }
 #endif
-        return TranscriptRootLocation.resolve()?.directory
+        return environment.resolveRoot()?.directory
     }
 
     /// 사용자가 고른 저장 루트. nil이면 앱이 정한 기본 위치를 쓴다.
@@ -419,13 +419,11 @@ final class MeetingRecorder {
     /// 소스별로 인스턴스를 따로 갖는 것이 두 경로가 독립이라는 불변식을 지키는 방식이다 —
     /// 한 소스를 잃어도 다른 소스의 항목은 그대로 남아 계속 흐른다.
     private var captures: [Speaker: any CaptureSource] = [:]
-    private var sessions: [Speaker: TranscriptionSession] = [:]
+    private var transcription: TranscriptionRun?
     /// 화자별 언어 중재기. 단일 언어일 때는 만들지 않는다.
     private var arbiters: [Speaker: LanguageArbiter] = [:]
     private var store: TranscriptStore?
     private var audioRecorder: AudioRecorder?
-    private var runTasks: [Task<Void, Never>] = []
-    private var reservedLocales: [Locale] = []
     /// 기본 장치 변경 감시기. 녹취 중에만 살아 있다.
     private var deviceMonitor: AudioDeviceMonitor?
     /// 소스별로 지금 어떤 방식으로 장치가 정해졌는지.
@@ -460,61 +458,58 @@ final class MeetingRecorder {
                 throw RecorderError.noInstalledLanguageModels
             }
 
-            let provisioned = try await provisionSessions()
-            let audioFormat = provisioned.audioFormat
-            // 켜지지 못한 소스의 세션을 아래에서 덜어내므로 변경 가능해야 한다.
-            var sessions = provisioned.sessions
+            let provisioned = try await environment.speech.prepare(language: language)
+            let transcription = TranscriptionRun(sessions: provisioned.sessions)
+            self.transcription = transcription
+            modelRetentionWarning = provisioned.retentionWarning
 
             // 저장 루트를 세션 시작 시점에 정한다. 고른 폴더를 쓸 수 없으면 기본 위치로
             // 되돌리고 접지 않는다 — 볼륨을 연결하지 않은 것을 잊었다고 회의를 잃으면 안 된다.
-            guard let rootLocation = TranscriptRootLocation.resolve() else {
+            guard let rootLocation = environment.resolveRoot() else {
                 throw RecorderError.noWritableTranscriptRoot
             }
             rootFallbackWarning = TranscriptRootLocation.warning(for: rootLocation)
             sessionRoot = rootLocation.directory
 
-            let startedAt = Date()
+            let startedAt = environment.now()
             let store = try TranscriptStore(startedAt: startedAt, root: rootLocation.directory)
             let audioRecorder = savesAudio
                 ? AudioRecorder(directory: store.sessionDirectory)
                 : nil
+            // 두 번째 소스를 기다리는 동안 첫 소스가 확정 결과를 낼 수 있다. 캡처 뒤에
+            // 저장소를 연결한 테스트에서는 화면에 표시된 첫 발화가 JSONL에 없었다.
+            self.store = store
+            self.audioRecorder = audioRecorder
 
             // 언어가 둘 이상이면 양쪽 전사기가 모두 결과를 낸다. 어느 쪽이 맞는지
             // 신뢰도로 판정할 중재기를 화자별로 둔다.
             if language.needsArbitration {
                 for speaker in Speaker.allCases {
-                    arbiters[speaker] = LanguageArbiter { [weak self] segment in
-                        await self?.commit(segment)
-                    }
+                    arbiters[speaker] = makeArbiter()
                 }
             }
 
             let failures = await startCaptures(
-                sessions: sessions,
-                audioFormat: audioFormat,
+                transcription: transcription,
+                audioFormat: provisioned.audioFormat,
                 audioRecorder: audioRecorder
             )
 
             // 켜지지 않은 소스의 전사 세션은 즉시 정리한다. 남겨두면 마무리 단계에서
             // 끝나지 않는 analyzer를 기다리게 된다.
             for speaker in Speaker.allCases where !activeSources.contains(speaker) {
-                if let unused = sessions.removeValue(forKey: speaker) {
-                    await unused.cancel()
-                }
+                await transcription.discardSession(for: speaker)
                 arbiters[speaker] = nil
             }
 
             // 둘 다 실패했을 때만 세션을 접는다.
             guard !activeSources.isEmpty else {
-                await teardown()
+                teardown()
                 state = .failed(Self.combined(failures))
                 return
             }
             sourceWarning = startupWarning(failures: failures)
 
-            self.sessions = sessions
-            self.store = store
-            self.audioRecorder = audioRecorder
             self.startedAt = startedAt
             // 캡처가 실제로 떴을 때만 노출한다. 시작이 실패한 세션의 디렉터리를 보여주면
             // 녹취되고 있다는 잘못된 확인을 주게 된다.
@@ -525,7 +520,7 @@ final class MeetingRecorder {
             // 사용자가 헤드셋으로 듣는 동안 탭은 빈 스피커를 계속 잡는다.
             startDeviceMonitoring()
         } catch {
-            await teardown()
+            teardown()
             state = .failed(Failure(error))
         }
     }
@@ -543,68 +538,6 @@ final class MeetingRecorder {
         )
     }
 
-    /// 언어 모델을 확보하고 소스별 전사 세션을 준비한다.
-    ///
-    /// **순서가 규칙이다.** 설치 확인 → 예약 → 오디오 포맷 질의 → 분석기 준비.
-    ///
-    /// - Returns: 소스별 전사 세션과, 두 세션이 공통으로 받아들일 캡처 포맷.
-    private func provisionSessions() async throws -> (
-        sessions: [Speaker: TranscriptionSession],
-        audioFormat: AVAudioFormat
-    ) {
-        let locales = try await SpeechModelInstaller.resolveLocales(language.locales)
-        guard await SpeechModelInstaller.areInstalled(locales: locales) else {
-            throw RecorderError.languageModelNotInstalled(language)
-        }
-
-        // 세션을 먼저 만든다. 필요한 에셋과 최적 오디오 포맷을 알아내려면
-        // 실제 모듈 인스턴스가 있어야 한다.
-        var sessions: [Speaker: TranscriptionSession] = [:]
-        for speaker in Speaker.allCases {
-            sessions[speaker] = TranscriptionSession(speaker: speaker, locales: locales)
-        }
-
-        let modules = await sessions[.me]!.modules
-        try await reserveModels(locales: locales, modules: modules)
-
-        // 모델이 하나라도 미설치면 여기서 nil이 나온다. 설치 이후에 물어야 한다.
-        guard let audioFormat = await TranscriptionSession.bestAudioFormat(for: modules) else {
-            throw RecorderError.noCompatibleAudioFormat
-        }
-
-        for session in sessions.values {
-            try await session.prepare(format: audioFormat)
-        }
-        return (sessions, audioFormat)
-    }
-
-    /// 언어 모델을 붙잡아 둔다. 실패해도 모델이 설치돼 있으면 경고로 강등한다.
-    ///
-    /// 설치가 끝난 모델만 세션 동안 예약한다. 실제로 잡힌 것만 해제 대상으로 남긴다 —
-    /// 예약하지 않은 로케일을 해제하면 false가 돌아올 뿐이지만(실측), 잡힌 로케일이 목록에서
-    /// 빠지면 그대로 붙잡힌 채 남아 다음 실행의 한도를 잠식한다.
-    private func reserveModels(locales: [Locale], modules: [any SpeechModule]) async throws {
-        let reservation = await SpeechModelInstaller.reserve(locales: locales)
-        reservedLocales = reservation.reserved
-        guard !reservation.isComplete else { return }
-
-        // 예약 실패로는 녹취를 막지 않는다. 실측에서 예약 0개 상태로도 최적 오디오 포맷
-        // 질의와 분석기 준비가 성공했으므로, 모델이 이미 설치돼 있으면 진행할 수 있다.
-        // 접는 것은 다운로드를 붙잡을 수단이 없는 미설치 경우뿐이다.
-        guard await SpeechModelInstaller.isInstalled(modules: modules) else {
-            let failed = reservation.unreserved[0]
-            throw SpeechModelInstaller.InstallError.reservationFailed(
-                locale: failed.locale,
-                reason: failed.reason,
-                requested: locales,
-                reserved: await SpeechModelInstaller.reservedLocales()
-            )
-        }
-        // 설치된 모델로 진행하되 회수 위험을 알린다. 조용히 넘어가면 회수 위험이
-        // 있는 세션과 없는 세션을 사용자가 구분할 수 없다.
-        modelRetentionWarning = Self.retentionWarning(for: reservation.unreserved)
-    }
-
     /// 두 소스를 서로 독립적으로 켠다.
     ///
     /// **한쪽이 실패해도 다른 쪽은 살린다.** 마이크만 있어도 혼자 말하는 회의는 전사돼야 하고,
@@ -613,32 +546,34 @@ final class MeetingRecorder {
     ///
     /// - Returns: 켜지지 못한 소스들의 실패 사유.
     private func startCaptures(
-        sessions: [Speaker: TranscriptionSession],
+        transcription: TranscriptionRun,
         audioFormat: AVAudioFormat,
         audioRecorder: AudioRecorder?
     ) async -> [Failure] {
         // 캡처할 장치를 소스별로 결정한다. 고정된 장치가 없으면 시스템 기본을 따라간다.
         deviceSelections = Dictionary(
             uniqueKeysWithValues: Speaker.allCases.map {
-                ($0, CaptureDeviceSelection.resolve(for: $0.deviceChange))
+                ($0, environment.resolveDevice($0.deviceChange))
             }
         )
 
         var failures: [Failure] = []
         for speaker in Speaker.allCases {
             do {
-                let capture = try await makeCapture(
-                    for: speaker,
-                    targetFormat: audioFormat,
-                    audioRecorder: audioRecorder,
-                    deviceUID: deviceSelections[speaker]?.deviceUID
+                let capture = try await environment.makeCapture(
+                    speaker, audioFormat, audioRecorder, deviceSelections[speaker]?.deviceUID
                 )
                 do {
                     try capture.start()
                     // 캡처가 실제로 떴을 때만 전사 세션을 물린다. 실패한 소스에
                     // 세션을 붙이면 끝나지 않는 스트림을 기다리는 태스크가 남아
                     // stop()이 영구 대기에 빠진다.
-                    await attach(session: sessions[speaker]!, to: capture.makeInputStream())
+                    await transcription.attach(speaker: speaker, to: capture.makeInputStream()) {
+                        [weak self, weak transcription] segment in
+                        guard let self, let transcription,
+                              self.transcription === transcription else { return }
+                        await self.handle(segment)
+                    }
                     captures[speaker] = capture
                     activeSources.insert(speaker)
                 } catch {
@@ -670,74 +605,6 @@ final class MeetingRecorder {
         return all.isEmpty ? nil : all.joined(separator: " / ")
     }
 
-    /// 소스에 맞는 캡처 경로를 만든다. 아직 열지는 않는다.
-    ///
-    /// 여기가 두 경로의 **유일한** 차이다 — 마이크는 `AVAudioEngine`이고 마이크 권한을 먼저
-    /// 받아야 하며, 시스템 출력은 Core Audio process tap이고 오디오 캡처 권한만 쓴다. 그
-    /// 차이를 이 함수 하나에 모아 두면 시작·재연결·정리는 소스를 구분하지 않는다.
-    ///
-    /// 권한 거부를 던져서 알린다. 조용히 nil을 돌려주면 실패 사유가 사라져 사용자에게
-    /// 무엇을 허용해야 하는지 알릴 수 없다.
-    private func makeCapture(
-        for speaker: Speaker,
-        targetFormat: AVAudioFormat,
-        audioRecorder: AudioRecorder?,
-        deviceUID: String?
-    ) async throws -> any CaptureSource {
-        switch speaker {
-        case .me:
-            guard await MicrophoneCapture.requestPermission() else {
-                throw MicrophoneCapture.CaptureError.permissionDenied
-            }
-            return MicrophoneCapture(
-                targetFormat: targetFormat,
-                audioRecorder: audioRecorder,
-                deviceUID: deviceUID
-            )
-        case .remote:
-            // 탭은 권한을 미리 물을 수 없다. 권한이 없어도 생성이 성공을 반환하므로
-            // (실측) 판정은 시작 이후의 진폭이 맡는다.
-            return SystemAudioCapture(
-                targetFormat: targetFormat,
-                audioRecorder: audioRecorder,
-                deviceUID: deviceUID
-            )
-        }
-    }
-
-    /// 전사 세션에 입력 스트림을 물리고 결과 수신 루프를 띄운다.
-    ///
-    /// 결과 수신과 오디오 공급을 다른 태스크로 나눈다. 한쪽이 다른 쪽을 막으면
-    /// 버퍼가 밀려 오디오가 드롭된다.
-    private func attach(
-        session: TranscriptionSession,
-        to inputStream: AsyncStream<AnalyzerInput>
-    ) async {
-        // 결과 스트림 구독을 analyzer 시작보다 먼저 열어야 초반 발화를 놓치지 않는다.
-        let segmentStream = await session.segments()
-        runTasks.append(
-            Task { @MainActor [weak self] in
-                // 한 발화의 기록이 끝난 뒤 다음 발화를 받는다. 이 루프를 앞서 나가게
-                // 하면(기록을 별도 태스크로 미루면) 화면에는 보이는데 파일에는 없는
-                // 발화가 생긴다. 종료가 이 태스크의 완료를 기다리므로, 여기서 기다리는
-                // 것이 곧 "회의록 생성 전에 기록이 끝나 있음"을 보장한다.
-                for await segment in segmentStream {
-                    await self?.handle(segment)
-                }
-            }
-        )
-        runTasks.append(
-            Task {
-                do {
-                    try await session.run(inputSequence: inputStream)
-                } catch {
-                    // 중지 요청에 의한 취소는 정상 흐름이다. 다른 오류도 이 소스만
-                    // 멈추므로 세션 전체를 실패로 만들지 않는다.
-                }
-            }
-        )
-    }
-
     // MARK: - 중지
 
     func stop() async {
@@ -754,16 +621,9 @@ final class MeetingRecorder {
 
         // 마무리를 무한정 기다리지 않는다. 전사기 하나가 응답하지 않아도
         // 회의록과 오디오 파일은 반드시 저장돼야 한다.
-        await withDeadline(seconds: 6) { [sessions, runTasks] in
-            for session in sessions.values {
-                await session.finish()
-            }
-            for task in runTasks {
-                _ = await task.value
-            }
-        }
-        // 남은 태스크는 강제로 취소한다.
-        for task in runTasks { task.cancel() }
+        await transcription?.finish(until: environment.finalizationTimeout)
+        // 시간 초과 후 취소 API의 반환을 다시 기다리면 같은 무한 대기에 빠진다.
+        transcription?.cancel()
 
         await drainPendingUtterances(into: store)
         segments = timeline.displaySegments
@@ -771,7 +631,7 @@ final class MeetingRecorder {
         let audioFiles = audioRecorder?.finish() ?? []
         let storageError = audioRecorder?.storageError
         lastSessionDirectory = await store?.finalize(audioFiles: audioFiles)
-        await teardown()
+        teardown()
 
         // 산출물이 확정된 뒤에 연다. 먼저 열면 회의록이 아직 없는 폴더를 보여준다.
         SessionFolderPolicy.openIfNeeded(
@@ -829,12 +689,12 @@ final class MeetingRecorder {
     /// 기본 장치 변경 감시를 시작한다. 녹취 중에만 감시한다 — 대기 중에는 따라갈 대상이
     /// 없고, 다음 시작이 그 시점의 장치를 새로 읽는다.
     private func startDeviceMonitoring() {
-        let monitor = AudioDeviceMonitor { [weak self] change in
+        let monitor = environment.makeDeviceMonitor { [weak self] change in
             Task { @MainActor [weak self] in
                 await self?.followDeviceChange(change)
             }
         }
-        monitor.start()
+        monitor?.start()
         deviceMonitor = monitor
     }
 
@@ -907,7 +767,7 @@ final class MeetingRecorder {
         RecordingPreferences.save(pinnedDeviceUID: uid, for: change)
 
         let speaker = change.speaker
-        let selection = CaptureDeviceSelection.resolve(for: change)
+        let selection = environment.resolveDevice(change)
         deviceSelections[speaker] = selection
 
         // 녹취 중이 아니면 다음 시작이 이 선택을 읽는다.
@@ -990,7 +850,7 @@ final class MeetingRecorder {
     /// 녹취 중에 세션을 갈아 끼운다.
     private func rotateWhileRecording() async {
         // 경계 시점을 먼저 확정한다. 이후 도착하는 발화는 새 세션의 몫이다.
-        let boundary = Date()
+        let boundary = environment.now()
         let previousStore = store
         let previousStart = startedAt
 
@@ -1040,6 +900,14 @@ final class MeetingRecorder {
     }
 
     // MARK: - 내부
+
+    private func makeArbiter() -> LanguageArbiter {
+        let runID = transcription?.id
+        return LanguageArbiter { [weak self] segment in
+            guard let self, let runID, self.transcription?.id == runID else { return }
+            await self.commit(segment)
+        }
+    }
 
     /// 전사기에서 갓 나온 결과를 받는다. 다국어면 중재를 거친다.
     private func handle(_ raw: TranscriptSegment) async {
@@ -1107,13 +975,11 @@ final class MeetingRecorder {
         await store?.append(finalized)
     }
 
-    private func teardown() async {
+    private func teardown() {
         deviceMonitor?.stop()
         deviceMonitor = nil
-        for task in runTasks { task.cancel() }
-        runTasks.removeAll()
-        for session in sessions.values { await session.cancel() }
-        sessions.removeAll()
+        transcription?.cancel()
+        transcription = nil
         for arbiter in arbiters.values { arbiter.reset() }
         arbiters.removeAll()
         captures.removeAll()
@@ -1125,27 +991,9 @@ final class MeetingRecorder {
         sessionRoot = nil
         sessionTimeOffset = 0
         microphoneMuted = false
-        if !reservedLocales.isEmpty {
-            await SpeechModelInstaller.release(locales: reservedLocales)
-            reservedLocales = []
-        }
-    }
-
-    /// 주어진 작업을 제한 시간 안에서만 기다린다. 초과하면 그냥 넘어간다.
-    ///
-    /// 마무리 단계에서 쓰인다. 응답하지 않는 전사기 하나 때문에 이미 확보한
-    /// 회의록과 오디오 파일을 잃는 것이 가장 나쁜 결과다.
-    private func withDeadline(
-        seconds: Double,
-        _ operation: @escaping @Sendable () async -> Void
-    ) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await operation() }
-            group.addTask { try? await Task.sleep(for: .seconds(seconds)) }
-            // 먼저 끝난 쪽이 이긴다.
-            await group.next()
-            group.cancelAll()
-        }
+        // 세션 종료는 설치된 언어의 구독을 해제할 이유가 아니다. macOS 26.6.2에서
+        // 예약 release가 transcription.en/ko 구독까지 해제해 설치 목록이 빈 배열이
+        // 됐다. 예약은 다음 녹취에서도 재사용하고 분석기·캡처 자원만 정리한다.
     }
 
     enum RecorderError: LocalizedError {

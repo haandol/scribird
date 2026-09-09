@@ -280,6 +280,8 @@ enum SpeechModelInstaller {
         )
     }
 
+    /// 언어 자산의 구독도 해제한다. 설치된 모델이 없어질 수 있으므로 일반 녹취 종료의
+    /// 자원 정리에서는 호출하지 않는다.
     static func release(locales: [Locale]) async {
         for locale in locales {
             _ = await AssetInventory.release(reservedLocale: locale)

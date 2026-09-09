@@ -147,6 +147,13 @@ failures — including on machines holding no reservations at all.
 
 #### A model stays on *Downloading*, or Korean disappeared after working before
 
+If English or Korean disappears **after stopping a recording** in Scribird 0.1.8 or
+earlier, update to 0.1.9 and install the missing model once from Settings › Recording.
+Those builds released the recording's locale reservations at stop. On macOS 26.6.2,
+that also unsubscribed the app from the model assets: a bilingual recording removed both
+English and Korean from the installed-locale list. Scribird 0.1.9 keeps those subscriptions
+when ending a recording and reuses the reservations on the next start.
+
 Scribird 0.1.8 and later treats installation and model reservation as separate operations.
 It waits for the macOS installation request and verifies the final installed-locale list;
 it does not cancel the request because the reported percentage stopped changing.
