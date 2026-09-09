@@ -181,15 +181,10 @@ struct SettingsView: View {
             Section(tr("전사", "Transcription")) {
                 // 녹취 중에도 바꿀 수 있다. 전환은 캡처와 회의 음성을 끊지 않고 전사기만
                 // 갈아 끼우므로, 언어가 틀렸다는 것을 회의 중에 발견해도 고칠 수 있다.
-                Picker(tr("회의 언어", "Meeting language"), selection: Binding(
-                    get: { recorder.language },
-                    set: { next in Task { await recorder.chooseLanguage(next) } }
-                )) {
-                    ForEach(recorder.availableLanguages) { language in
-                        Text(language.displayName).tag(language)
-                    }
-                }
-                .disabled(recorder.availableLanguages.isEmpty || recorder.isPreparingModel)
+                MeetingLanguagePicker(
+                    title: tr("회의 언어", "Meeting language"),
+                    recorder: recorder
+                )
 
                 if recorder.availableLanguages.isEmpty {
                     Text(tr("필수 English 모델이 설치되면 회의 언어를 선택할 수 있습니다.",

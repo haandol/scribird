@@ -38,19 +38,11 @@ struct TranscriptView: View {
     /// 실패하면 이전 언어로 계속 기록되므로, 고른 값을 보여주면 어느 언어로 인식되는지가
     /// 실제와 어긋나 결과를 해석할 수 없다.
     private var languagePicker: some View {
-        Picker("", selection: Binding(
-            get: { recorder.language },
-            set: { next in Task { await recorder.chooseLanguage(next) } }
-        )) {
-            ForEach(recorder.availableLanguages) { language in
-                Text(language.displayName).tag(language)
-            }
-        }
+        MeetingLanguagePicker(title: "", recorder: recorder)
         .labelsHidden()
         .pickerStyle(.menu)
         .controlSize(.small)
         .fixedSize()
-        .disabled(recorder.availableLanguages.isEmpty || recorder.isPreparingModel)
         .help(recorder.availableLanguages.isEmpty
               ? tr("필수 English 모델을 준비하고 있습니다. 설정에서 상태를 확인해 주세요.",
                    "The required English model is being prepared. Check its status in settings.")
