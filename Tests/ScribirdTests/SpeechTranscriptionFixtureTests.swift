@@ -417,8 +417,9 @@ static func transcribe(
     speaker: Speaker = .me,
     chunkFrames: AVAudioFrameCount = 4096
 ) async throws -> TranscriptionResult {
-    let url = try XCTUnwrap(AudioFixture.url, AudioFixture.skipReason)
-    try XCTSkipIf(AudioFixture.url == nil, AudioFixture.skipReason)
+    guard let url = AudioFixture.url else {
+        throw XCTSkip(AudioFixture.skipReason)
+    }
 
     let resolved = try await SpeechModelInstaller.resolveLocales(locales)
     let session = TranscriptionSession(speaker: speaker, locales: resolved)
