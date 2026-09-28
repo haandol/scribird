@@ -144,13 +144,17 @@ final class AudioRecorder: @unchecked Sendable {
         placement: AudioRecordingTimeline.Placement
     ) {
         let discardBefore = max(placement.discardBefore, nextWriteBlock * Self.blockFrames)
-        for index in 0..<placement.frameCount {
+        let skippedFrames = max(0, discardBefore - placement.startFrame)
+        guard skippedFrames < Int64(placement.frameCount) else { return }
+
+        // Trim the already-written prefix once, then reuse each mix block for
+        // the contiguous slice that fits in it. Keep sample arithmetic in order.
+        var index = Int(skippedFrames)
+        while index < placement.frameCount {
             let absoluteFrame = placement.startFrame + Int64(index)
-            // Never mix the same source twice or recreate an already flushed
-            // block when a capture callback arrives outside the reorder window.
-            guard absoluteFrame >= discardBefore else { continue }
             let block = absoluteFrame / Self.blockFrames
             let offset = Int(absoluteFrame % Self.blockFrames)
+            let count = min(placement.frameCount - index, Int(Self.blockFrames) - offset)
             let mixed: MixBlock
             if let existing = pendingBlocks[block] {
                 mixed = existing
@@ -159,15 +163,20 @@ final class AudioRecorder: @unchecked Sendable {
                 pendingBlocks[block] = created
                 mixed = created
             }
-            if placement.frameCount == frameCount {
-                mixed.samples[offset] += samples[index]
-            } else {
-                let position = Double(index) * Double(frameCount) / Double(placement.frameCount)
-                let lower = Int(position)
-                let upper = min(lower + 1, frameCount - 1)
-                let fraction = Float(position - Double(lower))
-                mixed.samples[offset] += samples[lower] + (samples[upper] - samples[lower]) * fraction
+            for localIndex in 0..<count {
+                let sourceIndex = index + localIndex
+                let destinationIndex = offset + localIndex
+                if placement.frameCount == frameCount {
+                    mixed.samples[destinationIndex] += samples[sourceIndex]
+                } else {
+                    let position = Double(sourceIndex) * Double(frameCount) / Double(placement.frameCount)
+                    let lower = Int(position)
+                    let upper = min(lower + 1, frameCount - 1)
+                    let fraction = Float(position - Double(lower))
+                    mixed.samples[destinationIndex] += samples[lower] + (samples[upper] - samples[lower]) * fraction
+                }
             }
+            index += count
         }
     }
 
@@ -335,55 +344,5 @@ final class AudioRecorder: @unchecked Sendable {
                    "Couldn't finalize \(name) into a playable file.")
             }
         }
-    }
-}
-
-extension AVAudioPCMBuffer {
-    /// 같은 포맷·같은 길이의 무음 버퍼를 만든다.
-    func silentCopy() -> AVAudioPCMBuffer? {
-        guard frameLength > 0,
-              let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength)
-        else { return nil }
-        copy.frameLength = frameLength
-
-        let source = UnsafeMutableAudioBufferListPointer(mutableAudioBufferList)
-        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        guard source.count == destination.count else { return nil }
-
-        for index in 0..<source.count {
-            guard let destinationData = destination[index].mData else { return nil }
-            let byteCount = min(
-                Int(source[index].mDataByteSize),
-                Int(destination[index].mDataByteSize)
-            )
-            memset(destinationData, 0, byteCount)
-            destination[index].mDataByteSize = UInt32(byteCount)
-        }
-        return copy
-    }
-
-    /// 같은 포맷·같은 내용의 독립 버퍼를 만든다.
-    func copied() -> AVAudioPCMBuffer? {
-        guard frameLength > 0,
-              let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength)
-        else { return nil }
-        copy.frameLength = frameLength
-
-        let source = UnsafeMutableAudioBufferListPointer(mutableAudioBufferList)
-        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        guard source.count == destination.count else { return nil }
-
-        for index in 0..<source.count {
-            guard let sourceData = source[index].mData,
-                  let destinationData = destination[index].mData
-            else { return nil }
-            let byteCount = min(
-                Int(source[index].mDataByteSize),
-                Int(destination[index].mDataByteSize)
-            )
-            memcpy(destinationData, sourceData, byteCount)
-            destination[index].mDataByteSize = UInt32(byteCount)
-        }
-        return copy
     }
 }
