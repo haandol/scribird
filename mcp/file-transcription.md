@@ -1,13 +1,16 @@
-# Audio file transcription
+# Audio and video file transcription
 
-Scribird transcribes local MP3, M4A, WAV, AIFF and CAF files from its app, command
+Scribird transcribes local MP3, M4A, WAV, AIFF, CAF, MP4 and MOV files from its app, command
 line, or the `transcribe_audio` MCP tool. macOS decodes and recognizes the audio
 without playing it or opening microphone/system-audio capture. Unreadable codecs
-and corrupt files return errors.
+and corrupt files return errors. For video, the first audio track is extracted into
+temporary mono WAV without decoding video frames. Leading silence, gaps and original
+duration are preserved, so timestamps use the original video timeline. Videos without
+an audio track return an error; no separate MP3 export is produced.
 
 ## App and command line
 
-In the transcript window, click **Transcribe File**, choose an audio file and its
+In the transcript window, click **Transcribe File**, choose an audio or video file and its
 language, then click **Transcribe**. The separate window shows finalized text and
 links to its working/output folder. Closing the window leaves the job running;
 **Cancel** stops it. Live meeting recording keeps its own state and output.
@@ -103,11 +106,12 @@ Example arguments:
 ```
 
 The result has `sourcePath`, `durationSeconds`, `language`, `text`, `segments`,
-`outputDirectory`, `jsonlPath`, `markdownPath`, `engine`, optional `model`, and
+`outputDirectory`, `jsonlPath`, `markdownPath`, `engine`, `model`, and
 `timestampGranularity`. Each segment has `id`, `speaker`,
 `start`, `end`, `text`, optional `confidence`, and `locale`. Times are seconds from
 the beginning of the file. SpeechAnalyzer reports utterance ranges
-(`timestampGranularity=utterance`); Qwen3 reports input chunks up to 20 seconds
+(`timestampGranularity=utterance`), identifying the selected SpeechTranscriber module
+and locale without inventing a model-weight version; Qwen3 reports input chunks up to 20 seconds
 (`timestampGranularity=chunk`) and no confidence value. Qwen3 times are not exact
 utterance or word boundaries. **`speaker` is always `unknown`**: a recording can contain
 several voices and this feature does not identify them. All channels are recognized
@@ -141,14 +145,19 @@ sequenceDiagram
         App->>Disk: Append and sync transcript.jsonl
     end
     ASR-->>App: End of results
-    App->>Disk: Write transcript.md and result.json
+    App->>Disk: Write transcript.md
     App-->>Adapter: JSON result
+    Adapter->>Disk: Commit result.json before the deadline
     Adapter-->>Client: Text, segments and saved paths
 ```
 
 `transcript.jsonl` is written and synchronized after each finalized segment. After
 all results arrive, `transcript.md` and `result.json` are written before the success
 response. `result.json` contains the CLI result and marks a completed import.
+For MCP calls the worker defers this marker: the adapter commits it only after
+receiving and validating the result before its deadline. Standalone CLI and app
+imports commit it directly. Cancellation during final writes removes the marker
+while retaining synchronized JSONL.
 Archive headings and speaker labels stay English regardless of the interface language.
 
 Silence succeeds with empty text and segments; Markdown states that no speech was

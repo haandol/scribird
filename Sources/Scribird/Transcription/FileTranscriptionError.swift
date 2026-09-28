@@ -11,8 +11,8 @@ enum FileTranscriptionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidFile:
-            tr("읽을 수 있는 로컬 음성 파일을 선택하세요.",
-               "Choose a readable local audio file.")
+            tr("읽을 수 있는 로컬 음성 또는 영상 파일을 선택하세요.",
+               "Choose a readable local audio or video file.")
         case .unsupportedLanguage:
             tr("파일 전사 언어는 korean 또는 english를 지정하세요.",
                "Use korean or english for file transcription.")

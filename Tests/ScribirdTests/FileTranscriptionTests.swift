@@ -134,6 +134,8 @@ final class FileTranscriptArchiveTests: XCTestCase {
         let result = try await FileTranscription.transcribe(source: source, language: .english, outputRoot: root)
         XCTAssertTrue(result.text.lowercased().contains("project meeting"))
         XCTAssertTrue(result.text.lowercased().contains("final transcript"))
+        XCTAssertTrue(result.model.hasPrefix("Apple SpeechTranscriber ("))
+        XCTAssertTrue(result.model.contains(result.segments.first?.locale ?? "missing"))
         XCTAssertTrue(result.segments.allSatisfy { $0.speaker == "unknown" && $0.start >= 0 && $0.end <= result.durationSeconds + 1 })
         XCTAssertEqual(try Data(contentsOf: source), before)
         let jsonl = try String(contentsOfFile: result.jsonlPath, encoding: .utf8)
@@ -188,5 +190,33 @@ final class FileTranscriptArchiveTests: XCTestCase {
         XCTAssertEqual(result.timestampGranularity, "chunk")
         XCTAssertTrue(result.text.lowercased().contains("final transcript"))
         XCTAssertEqual(result.segments.first?.start, 0)
+    }
+
+    /// Cancellation during document writing preserves JSONL and leaves no completion marker, whether it
+    /// occurs before or after the write.
+    func test_cancellationDuringFinalization_removesCompletionMarker() async throws {
+        for filename in ["transcript.md", "result.json"] {
+            let store = try FileTranscriptArchive(root: root) { data, url in
+                try data.write(to: url, options: .atomic)
+                if url.lastPathComponent == filename { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+            try await store.append(.init(start: 0, end: 1, text: "Preserved.", locale: "en_US"))
+            let task = Task { try await store.finish(source: URL(fileURLWithPath: "/tmp/a.wav"), duration: 1, language: .english) }
+            do { _ = try await task.value; XCTFail("Cancelled finalization must fail") } catch {}
+            let directory = await store.directory
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appending(path: "result.json").path))
+            XCTAssertGreaterThan(try Data(contentsOf: directory.appending(path: "transcript.jsonl")).count, 0)
+        }
+    }
+
+    /// The child runner must not finalize the completion marker
+    /// before the MCP coordinator finishes receiving results.
+    func test_deferredCompletion_writesDocumentsWithoutMarker() async throws {
+        let store = try FileTranscriptArchive(root: root)
+        try await store.append(.init(start: 0, end: 1, text: "Saved.", locale: "en_US"))
+        let result = try await store.finish(source: URL(fileURLWithPath: "/tmp/a.wav"), duration: 1,
+                                            language: .english, commitCompletion: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.markdownPath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: URL(fileURLWithPath: result.outputDirectory).appending(path: "result.json").path))
     }
 }

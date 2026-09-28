@@ -8,11 +8,14 @@ struct FileTranscriptionCommand {
 
     static let usage = """
     Usage: Scribird --transcribe /path/recording.mp4 [--language english|korean] [--engine speech-analyzer|qwen3] [--output-root /path/results]
+    Audio files and MP4/MOV video are supported. Video uses its first audio track and original timeline.
     Transcribes locally. Defaults to English and SpeechAnalyzer; Qwen3 downloads its runtime and model on first use.
     Writes transcript.jsonl, transcript.md and result.json in a new import directory.
     Prints one JSON result to stdout; errors go to stderr with a nonzero exit code.
     """
 
+    /// Validates language, engine, and duplicate arguments before starting so invalid requests cannot
+    /// silently use defaults.
     init(arguments: [String]) throws {
         var options: [String: String] = [:]
         var index = 0
@@ -44,8 +47,10 @@ struct FileTranscriptionCommand {
         }
     }
 
-    func run() async throws -> FileTranscriptionResult {
-        try await FileTranscription.transcribe(source: source, language: language, outputRoot: outputRoot, engine: engine)
+    /// Uses the app's file transcription and storage contracts without opening UI or capture devices.
+    func run(commitCompletion: Bool = true) async throws -> FileTranscriptionResult {
+        try await FileTranscription.transcribe(source: source, language: language, outputRoot: outputRoot,
+                                              engine: engine, commitCompletion: commitCompletion)
     }
 
     enum CommandError: LocalizedError {

@@ -2,7 +2,10 @@ import Foundation
 
 struct QwenFileTranscriber: FileTranscribing {
     let language: TranscriptionLanguage
+    var modelDescription: String { FileTranscriptionEngine.qwen3.modelIdentifier }
 
+    /// Delivers only the specified local model's results and fails without a valid completion signal.
+    /// Returns an error on unsupported devices instead of switching engines.
     func transcribe(
         audio: URL,
         onSegment: @escaping @Sendable (FileTranscriptRecord) async throws -> Void
@@ -38,6 +41,8 @@ struct QwenFileTranscriber: FileTranscribing {
         #endif
     }
 
+    /// Uses the same runner for bundled and development builds.
+    /// Installed apps do not require a source checkout.
     static func runtimeDirectory() -> URL {
         if let bundled = Bundle.main.resourceURL?.appending(path: "QwenRuntime"),
            FileManager.default.fileExists(atPath: bundled.appending(path: "transcribe.py").path) {
@@ -48,41 +53,16 @@ struct QwenFileTranscriber: FileTranscribing {
             .appending(path: "runtime/qwen")
     }
 
+    /// Reuses a prepared environment and installs locked dependencies only for initial setup.
+    /// Fails the selected Qwen3 task if an external prerequisite is missing or installation fails.
     private static func preparePython(runtime: URL) async throws -> URL {
-        if let override = ProcessInfo.processInfo.environment["SCRIBIRD_QWEN_PYTHON"] {
-            let python = URL(fileURLWithPath: override)
-            guard FileManager.default.isExecutableFile(atPath: python.path) else {
-                throw RuntimeError.message(tr("지정한 Qwen3 Python 실행 파일을 찾을 수 없습니다.",
-                                               "The configured Qwen3 Python executable is unavailable."))
-            }
-            return python
-        }
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                  appropriateFor: nil, create: true)
-        let environment = support.appending(path: "Scribird/QwenRuntime/0.1.0")
-        let python = environment.appending(path: "bin/python")
-        let marker = environment.appending(path: ".scribird-ready")
-        // 버전별 환경이 완성된 뒤에는 uv나 네트워크 없이 Python을 바로 실행한다.
-        if FileManager.default.isExecutableFile(atPath: python.path),
-           FileManager.default.fileExists(atPath: marker.path) { return python }
-        let candidates = [ProcessInfo.processInfo.environment["SCRIBIRD_UV_EXECUTABLE"],
-                          "/opt/homebrew/bin/uv", "/usr/local/bin/uv",
+        let candidates = ["/opt/homebrew/bin/uv", "/usr/local/bin/uv",
                           FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/bin/uv").path]
-        guard let uv = candidates.compactMap({ $0 }).first(where: {
-            FileManager.default.isExecutableFile(atPath: $0)
-        }) else {
-            throw RuntimeError.message(tr("Qwen3 실행 환경 준비에 uv가 필요합니다. uv를 설치한 뒤 다시 시도하세요.",
-                                           "Qwen3 setup requires uv. Install uv and try again."))
-        }
-        var variables = ProcessInfo.processInfo.environment
-        variables["UV_PROJECT_ENVIRONMENT"] = environment.path
-        try await LocalTranscriptionProcess.run(
-            executable: URL(fileURLWithPath: uv),
-            arguments: ["sync", "--project", runtime.path, "--frozen", "--python", "3.12"],
-            environment: variables
-        ) { _ in }
-        try Data().write(to: marker, options: .atomic)
-        return python
+        return try await QwenRuntime.prepare(runtime: runtime, supportDirectory: support,
+                                             variables: ProcessInfo.processInfo.environment,
+                                             uvCandidates: candidates)
     }
 
     private struct Event: Decodable {
@@ -108,5 +88,6 @@ struct QwenFileTranscriber: FileTranscribing {
 
 private actor QwenCompletion {
     var isComplete = false
+    /// Tracks the runner's completion notice separately so truncated output cannot be mistaken for success.
     func markComplete() { isComplete = true }
 }

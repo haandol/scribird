@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import signal
+import tempfile
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -34,19 +35,20 @@ class TranscriptionResult(BaseModel):
     jsonlPath: str
     markdownPath: str
     engine: Literal["speech-analyzer", "qwen3"]
-    model: str | None = None
+    model: Annotated[str, Field(min_length=1)]
     timestampGranularity: Literal["utterance", "chunk"]
 
 
 mcp = FastMCP("Scribird", instructions=(
     "Control the running Scribird app and read saved sessions on this Mac. "
     "Use get_app_status/get_settings before changes. Live language auto means Korean + English. "
-    "Transcribe local audio files on macOS 26 using SpeechAnalyzer or Qwen3 MLX. "
+    "Transcribe local audio or video files on macOS 26 using SpeechAnalyzer or Qwen3 MLX. "
     "No audio uploads. File speakers are unknown; this tool does not diarize."
 ))
 
 
 def executable_path() -> Path:
+    """Select an explicit or installed worker without changing the user's running app."""
     configured = os.environ.get("SCRIBIRD_EXECUTABLE")
     if configured:
         candidates = [Path(configured).expanduser()]
@@ -62,6 +64,7 @@ def executable_path() -> Path:
 
 
 async def stop_process(process: asyncio.subprocess.Process) -> None:
+    """Stop only this call's process group and allow its temporary-audio cleanup to finish."""
     if process.returncode is not None:
         return
     try:
@@ -71,13 +74,33 @@ async def stop_process(process: asyncio.subprocess.Process) -> None:
     try:
         # Give Scribird time to reap its worker (3s forced-stop fallback) and
         # remove temporary audio before escalating the whole group to SIGKILL.
-        await asyncio.wait_for(process.wait(), timeout=10)
+        await asyncio.wait_for(process.communicate(), timeout=10)
     except TimeoutError:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        await process.wait()
+        await process.communicate()
+
+
+def commit_result(result: TranscriptionResult) -> None:
+    """Commit completion after this MCP call receives and validates the worker result."""
+    directory = Path(result.outputDirectory)
+    for path in [result.jsonlPath, result.markdownPath]:
+        artifact = Path(path)
+        if artifact.parent.resolve() != directory.resolve() or not artifact.is_file():
+            raise ValueError("Scribird returned a result without its saved transcript files.")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".result-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(result.model_dump_json().encode())
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(directory / "result.json")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 @mcp.tool(annotations=ToolAnnotations(
@@ -91,7 +114,11 @@ async def transcribe_audio(
     timeout_seconds: Annotated[int, Field(ge=1, le=3600)] = 600,
     ctx: Context | None = None,
 ) -> TranscriptionResult:
-    """Transcribe a local MP3, M4A, WAV, AIFF or CAF audio file without playing it.
+    """Transcribe local audio (MP3/M4A/WAV/AIFF/CAF) or video (MP4/MOV) without playing it.
+
+    For video, extracts only the first audio track and preserves the original video
+    timeline, including leading silence and gaps. Videos without audio are errors.
+    Audio is prepared as temporary WAV; no separate MP3 export is created.
 
     file_path must be an absolute path on this Mac (or start with ~).
     For speech-analyzer, install the language model in Scribird settings first.
@@ -125,12 +152,19 @@ async def transcribe_audio(
         command.extend(["--output-root", str(root)])
     if ctx:
         await ctx.report_progress(progress=0, total=1, message="Transcribing audio locally")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    environment = dict(os.environ)
+    # A worker cannot decide whether its response reached this coordinator before
+    # the MCP deadline. Defer the completion marker until collection succeeds.
+    environment["_SCRIBIRD_MCP_DEFER_COMPLETION"] = "1"
     process = await asyncio.create_subprocess_exec(
         *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
+        env=environment,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=max(0, deadline - loop.time()))
     except TimeoutError as error:
         await asyncio.shield(stop_process(process))
         raise ValueError(f"Transcription exceeded {timeout_seconds} seconds. Any partial JSONL is retained in the output root.") from error
@@ -145,7 +179,15 @@ async def transcribe_audio(
     except (ValueError, TypeError) as error:
         raise ValueError("Scribird returned an invalid result; rebuild it with file transcription support.") from error
     if ctx:
-        await ctx.report_progress(progress=1, total=1, message="Transcript saved")
+        await ctx.report_progress(progress=1, total=1, message="Finalizing saved transcript")
+    if loop.time() >= deadline:
+        raise ValueError(f"Transcription exceeded {timeout_seconds} seconds. Any partial JSONL is retained in the output root.")
+    # No await between committing and returning: a cancellation observed before
+    # this point leaves no marker; completion is committed as one local action.
+    commit_result(result)
+    if loop.time() >= deadline:
+        (Path(result.outputDirectory) / "result.json").unlink(missing_ok=True)
+        raise ValueError(f"Transcription exceeded {timeout_seconds} seconds while saving its result.")
     return result
 
 

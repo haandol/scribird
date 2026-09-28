@@ -174,13 +174,15 @@ it reads the saved root preference, then defaults to `~/Documents/Scribird`.
 Pass `output_root` to inspect an old root, a fallback root, or file imports saved at
 the CLI/MCP default. The returned `outputRoot` identifies the folder actually scanned.
 
-## Audio-file transcription
+## Audio and video file transcription
 
-`transcribe_audio` accepts local audio, `language=english|korean`,
+`transcribe_audio` accepts local audio or MP4/MOV video, `language=english|korean`,
 `engine=speech-analyzer|qwen3`, an optional output root and a timeout of 1–3600 seconds.
 It runs a separate headless worker, creates a new `import-<UUID>` directory, and labels
 speakers `unknown`. It does not control or cancel an import started in the app window.
 Cancel its MCP request to stop its own worker/process group; partial JSONL remains.
+Video uses the first audio track and retains the original timeline. No-audio video
+is an error; audio is prepared as temporary WAV without creating an exported MP3.
 
 See [file-transcription.md](file-transcription.md) for the complete CLI, result schema,
 Qwen setup, timestamp granularity, saved-file and failure contracts. Live `auto` mode

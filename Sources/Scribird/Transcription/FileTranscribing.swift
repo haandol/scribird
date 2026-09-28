@@ -1,7 +1,10 @@
 import Foundation
 
-/// 엔진은 확정 결과만 전달하고, 저장·화면 반영·완료 처리는 공통 경로가 맡는다.
+/// Engines deliver finalized results; the shared path handles persistence, display, and completion.
 protocol FileTranscribing: Sendable {
+    var modelDescription: String { get }
+
+    /// Delivers all finalized results before the archive marks completion and propagates failures unchanged.
     func transcribe(
         audio: URL,
         onSegment: @escaping @Sendable (FileTranscriptRecord) async throws -> Void

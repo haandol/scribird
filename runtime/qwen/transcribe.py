@@ -19,6 +19,7 @@ MODEL_FILES = ["config.json", "model.safetensors", "model.safetensors.index.json
 
 
 def model_directory():
+    """Reuse the pinned local model or download missing assets without sending input audio."""
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import LocalEntryNotFoundError
     try:
@@ -29,8 +30,8 @@ def model_directory():
     except LocalEntryNotFoundError:
         print("Downloading " + MODEL_ID + " (first use)", file=sys.stderr, flush=True)
         snapshot = snapshot_download(MODEL_ID, revision=MODEL_REVISION, allow_patterns=MODEL_FILES)
-    # 이 변환본에는 전처리 설정이 없어 공식 원본의 설정을 함께 제공한다.
-    # HF 스냅샷과 가중치는 변경하지 않고 별도 디렉터리에서 참조한다.
+    # This converted model lacks preprocessing settings, so include the official source model's settings.
+    # Reference the Hugging Face snapshot and weights from a separate directory without modifying them.
     directory = Path.home() / "Library/Application Support/Scribird/Qwen3" / MODEL_REVISION
     directory.mkdir(parents=True, exist_ok=True)
     for name in MODEL_FILES:
@@ -50,6 +51,7 @@ def model_directory():
 
 
 def transcribe(audio_path, language, emit):
+    """Emit complete local chunks with input-relative times; reject truncated generation."""
     import numpy as np
     import soundfile as sf
     from scipy.signal import resample_poly
@@ -57,6 +59,8 @@ def transcribe(audio_path, language, emit):
 
     model = load(str(model_directory()))
     with sf.SoundFile(audio_path) as audio:
+        if audio.channels != 1:
+            raise ValueError("The Qwen worker requires the application's prepared mono audio.")
         sample_rate = audio.samplerate
         offset = 0
         while True:
@@ -64,8 +68,8 @@ def transcribe(audio_path, language, emit):
             if not len(samples):
                 break
             frames = len(samples)
-            mono = samples.mean(axis=1)
-            # 완전 무음에서 생성 모델이 만들어 낸 문장을 결과로 저장하지 않는다.
+            mono = samples[:, 0]
+            # Do not save sentences generated from entirely silent audio.
             if np.max(np.abs(mono)) > 1e-7:
                 divisor = math.gcd(sample_rate, 16000)
                 if sample_rate != 16000:
@@ -82,8 +86,9 @@ def transcribe(audio_path, language, emit):
 
 
 def main():
-    # Swift의 신호 수신기는 SIG_IGN을 사용한다. 상속된 무시 상태를 해제해야
-    # 취소 요청으로 이 자식이 종료되고 부모가 임시 오디오를 정리할 수 있다.
+    """Keep the JSONL result channel clean and make inherited termination signals cancellable."""
+    # Swift's signal handler uses SIG_IGN. Reset the inherited ignore disposition so
+    # cancellation can terminate this child and let the parent clean up temporary audio.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.default_int_handler)
     parser = argparse.ArgumentParser()
@@ -92,6 +97,7 @@ def main():
     args = parser.parse_args()
     protocol = sys.stdout
     def emit(event):
+        """Flush each event so the caller can persist finalized text before completion."""
         protocol.write(json.dumps(event, ensure_ascii=False) + "\n")
         protocol.flush()
     try:

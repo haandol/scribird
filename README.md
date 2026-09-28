@@ -17,7 +17,7 @@ Scribird writes down your Zoom or Teams meeting while it happens. Your microphon
 labeled **me**, whatever comes out of your speakers is labeled **remote**, and when the
 meeting ends you are left with a transcript and the meeting audio in a single folder.
 
-You can also [transcribe an existing MP3, M4A or other audio file](mcp/file-transcription.md)
+You can also [transcribe an audio file or the audio from an MP4/MOV video](mcp/file-transcription.md)
 from **Transcribe File** in the app, the command line, or the local
 `transcribe_audio` MCP tool. File imports support English or Korean and save timed
 JSONL and Markdown transcripts; imported speakers are marked `unknown`. Choose
@@ -60,7 +60,7 @@ it is still volatile — the moment it is finalized it sharpens and is written t
 |---|---|
 | **Automatic speaker attribution** | Microphone is *me*, system output is *remote*. The audio path decides the speaker, so there is nothing to infer and nothing to get wrong |
 | **Live transcription** | Volatile text appears dimmed while you speak and sharpens once finalized. Finalized text is written to disk immediately |
-| **Local file ASR** | Transcribe MP3, M4A, WAV and other audio files with SpeechAnalyzer or Qwen3 ASR. Use the app, CLI or MCP; audio stays on your Mac |
+| **Local file ASR** | Transcribe audio files and MP4/MOV video audio with SpeechAnalyzer or Qwen3 ASR. Use the app, CLI or MCP |
 | **Korean + English** | Both languages are recognized at once. Code-switching meetings keep both sides thanks to token-level arbitration |
 | **Switch language mid-meeting** | Pick any installed meeting language from the transcript window while recording. The audio and transcript continue — only the transcribers change |
 | **Meeting audio kept** | Microphone and system output are mixed live into one mono `meeting.m4a` for natural playback and later re-transcription |
@@ -203,9 +203,16 @@ before repeating a change: the app may still finish the original operation. The
 ### Local Qwen3 ASR for audio files
 
 ASR means automatic speech recognition: converting speech into text. Click
-**Transcribe File** in the transcript window, select an MP3, M4A, WAV, AIFF or CAF
-file, and choose **Qwen3 ASR (MLX 8-bit)** or **SpeechAnalyzer** under **ASR engine**.
+**Transcribe File** in the transcript window, select an MP3, M4A, WAV, AIFF, CAF,
+MP4 or MOV file, and choose **Qwen3 ASR (MLX 8-bit)** or **SpeechAnalyzer** under **ASR engine**.
 Choose **English** or **Korean**, then click **Transcribe**.
+
+For video, Scribird extracts the **first audio track** without playing or decoding
+the video frames. It preserves the original video timeline, including delayed audio
+and gaps. Temporary audio uses WAV, so this step does not add MP3 compression loss.
+The temporary file is removed after ordinary completion or cancellation; there is
+no separate MP3 export. A video with no audio track returns an error. Other video
+formats depend on macOS media support.
 
 | Engine | Required setup | Time information |
 |---|---|---|

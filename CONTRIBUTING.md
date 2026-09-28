@@ -31,6 +31,13 @@ integration tests. Keep generated audio and results under ignored `build/`.
 Set `SCRIBIRD_FILE_SCREENSHOTS` to an ignored output directory to render the file
 window and its entry point in both languages. These captures do not focus a window.
 
+Video integration tests use `SCRIBIRD_VIDEO_FIXTURE_DIR` with generated `offset.mp4`
+and `offset.mov` (12 seconds, English fixture audio delayed by 2 seconds),
+`no-audio.mp4` (video only), and `two-tracks.mp4` (silent first audio track, audible
+second track). The timeline writer also has deterministic sample tests for gaps,
+overlap and trimming. Fixture generation may use local ffmpeg; the app and MCP do
+not require ffmpeg at runtime.
+
 Qwen3 integration tests require a prepared runtime and cached model. Set
 `SCRIBIRD_QWEN_TESTS=1`, `HF_HUB_OFFLINE=1`, and `SCRIBIRD_QWEN_PYTHON` to the prepared
 Python executable alongside the fixture variable. Prepare/download with a normal

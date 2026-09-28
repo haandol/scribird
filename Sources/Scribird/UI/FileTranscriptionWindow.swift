@@ -7,6 +7,7 @@ final class FileTranscriptionWindow {
     private let model = FileTranscriptionModel()
     private var window: NSWindow?
 
+    /// Reopening the window preserves the active file task and shows the same results.
     func show(languageSettings: AppLanguageSettings) {
         if window == nil {
             let newWindow = NSWindow(

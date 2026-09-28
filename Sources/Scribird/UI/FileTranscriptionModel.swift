@@ -16,10 +16,11 @@ final class FileTranscriptionModel {
     private(set) var outputDirectory: URL?
     private var task: Task<Void, Never>?
 
+    /// Offers audio and video file selection without changing an active task's input.
     func chooseFile() {
         guard !isRunning else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.audio]
+        panel.allowedContentTypes = [.audio, .movie]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.prompt = tr("선택", "Choose")
@@ -29,6 +30,8 @@ final class FileTranscriptionModel {
         }
     }
 
+    /// Captures selections at task start and retains temporary access for the task's lifetime.
+    /// Displays only saved, finalized results and distinguishes failure and cancellation from completion.
     func start() {
         guard !isRunning, let source else { return }
         isRunning = true
@@ -65,15 +68,18 @@ final class FileTranscriptionModel {
         }
     }
 
+    /// Adds source-relative times to saved, finalized utterances so users can compare them with the media.
     private func append(_ record: FileTranscriptRecord) {
         if !text.isEmpty { text += "\n\n" }
         text += "[\(formatTimecode(record.start))] \(record.text)"
     }
 
+    /// Retains the partial-results folder so users can open it after failure or cancellation.
     private func setOutputDirectory(_ directory: URL) {
         outputDirectory = directory
     }
 
+    /// Keeps the task active until cleanup finishes so cancellation cannot overlap a new task's start.
     func cancel() {
         guard isRunning else { return }
         isCancelling = true

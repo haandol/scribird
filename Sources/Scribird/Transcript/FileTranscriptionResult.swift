@@ -10,6 +10,6 @@ struct FileTranscriptionResult: Codable, Sendable {
     let jsonlPath: String
     let markdownPath: String
     let engine: FileTranscriptionEngine
-    let model: String?
+    let model: String
     let timestampGranularity: String
 }

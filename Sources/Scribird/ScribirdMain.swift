@@ -3,6 +3,8 @@ import Foundation
 @main
 enum ScribirdMain {
     @MainActor
+    /// Routes CLI input to work without capture and handles termination signals as cancellation
+    /// so cancellation preserves partial results and removes temporary files.
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.contains("--help") {
@@ -10,12 +12,16 @@ enum ScribirdMain {
             return
         }
         if arguments.contains("--transcribe") {
-            let commandTask = Task { try await FileTranscriptionCommand(arguments: arguments).run() }
+            // The MCP coordinator writes the completion marker after receiving the result,
+            // preventing a timed-out response from leaving a completed archive.
+            // The CLI and app write the marker directly.
+            let commitCompletion = ProcessInfo.processInfo.environment["_SCRIBIRD_MCP_DEFER_COMPLETION"] != "1"
+            let commandTask = Task { try await FileTranscriptionCommand(arguments: arguments).run(commitCompletion: commitCompletion) }
             let signals = [SIGINT, SIGTERM].map { value in
                 signal(value, SIG_IGN)
                 let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
-                // 전역 큐의 콜백이 main()의 MainActor 격리를 상속하면 신호 수신 시
-                // dispatch_assert_queue_fail로 종료되어 임시 파일 정리도 실행되지 않는다.
+                // If this global-queue callback inherits main()'s MainActor isolation, a signal
+                // triggers dispatch_assert_queue_fail and prevents temporary-file cleanup.
                 source.setEventHandler { @Sendable in commandTask.cancel() }
                 source.resume()
                 return source

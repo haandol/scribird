@@ -5,6 +5,16 @@ import XCTest
 
 @MainActor
 final class FileTranscriptionViewTests: XCTestCase {
+    /// Before starting, guidance in both languages identifies external prerequisites and automatic downloads.
+    func test_qwenSetupNotice_explainsUvBeforeStarting() {
+        for language in AppLanguage.allCases {
+            let notice = FileTranscriptionEngine.qwen3.setupNotice(language: language)
+            XCTAssertTrue(notice.contains("uv"))
+            XCTAssertTrue(notice.contains("Apple Silicon"))
+            XCTAssertTrue(notice.contains("2.3"))
+            XCTAssertTrue(notice.contains("20"))
+        }
+    }
     func test_noSelectedFile_doesNotStartAJob() {
         let model = FileTranscriptionModel()
         model.start()
@@ -23,7 +33,7 @@ final class FileTranscriptionViewTests: XCTestCase {
         for language in AppLanguage.allCases {
             let settings = AppLanguageSettings(stored: language)
             let model = FileTranscriptionModel()
-            model.source = URL(fileURLWithPath: "/tmp/An audio file with a long filename for checking truncation.mp3")
+            model.source = URL(fileURLWithPath: "/tmp/A video file with a long filename for checking truncation.mp4")
             try render(FileTranscriptionView(model: model, languageSettings: settings),
                        size: CGSize(width: 540, height: 510),
                        to: directory.appending(path: "file-\(language.rawValue).png"))

@@ -5,7 +5,10 @@ struct SpeechFileTranscriber: FileTranscribing {
     private let locale: Locale
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
+    var modelDescription: String { "Apple SpeechTranscriber (\(locale.identifier))" }
 
+    /// Checks readiness for the selected language first because file jobs
+    /// do not automatically install Speech models.
     init(language: TranscriptionLanguage) async throws {
         let locales = try await SpeechModelInstaller.resolveLocales(language.locales)
         guard await SpeechModelInstaller.areInstalled(locales: locales) else {
@@ -16,13 +19,15 @@ struct SpeechFileTranscriber: FileTranscribing {
             locale: locale, transcriptionOptions: [], reportingOptions: [],
             attributeOptions: [.audioTimeRange, .transcriptionConfidence]
         )
-        // 실시간 세션의 모델 예약은 바꾸지 않는다.
+        // Leave the live session's model reservations unchanged.
         analyzer = SpeechAnalyzer(
             modules: [transcriber],
             options: .init(priority: .utility, modelRetention: .whileInUse)
         )
     }
 
+    /// Returns after delivering the file's final results; cancellation or failure closes both the analyzer
+    /// and result receiver.
     func transcribe(
         audio: URL,
         onSegment: @escaping @Sendable (FileTranscriptRecord) async throws -> Void
@@ -46,7 +51,7 @@ struct SpeechFileTranscriber: FileTranscribing {
                         }
                     }
                     do {
-                        // 마지막 결과까지 받은 뒤 반환해야 공통 저장기가 안전하게 닫힌다.
+                        // Receive every final result before returning so the shared archive can close safely.
                         try await analyzer.start(inputAudioFile: file, finishAfterFile: true)
                         try await group.waitForAll()
                     } catch {
@@ -64,6 +69,7 @@ struct SpeechFileTranscriber: FileTranscribing {
         }
     }
 
+    /// Copies only model-provided timing and confidence, leaving imported-file speakers unassigned.
     private static func record(_ result: SpeechTranscriber.Result, locale: Locale) -> FileTranscriptRecord {
         let confidences = result.text.runs.compactMap(\.transcriptionConfidence)
         return FileTranscriptRecord(

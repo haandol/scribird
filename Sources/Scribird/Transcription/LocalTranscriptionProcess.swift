@@ -1,7 +1,8 @@
 import Foundation
 
-/// 자식 출력이 읽히는 동안 취소할 수 있어야 큰 파일의 전사를 UI에서 멈출 수 있다.
+/// Allows cancellation while reading child output so the UI can stop transcription of large files.
 enum LocalTranscriptionProcess {
+    /// Delivers results line by line, surfaces runner errors and cancellation, and cleans up the owned process.
     static func run(
         executable: URL, arguments: [String], environment: [String: String]? = nil,
         onLine: @escaping @Sendable (String) async throws -> Void
@@ -44,7 +45,8 @@ enum LocalTranscriptionProcess {
                 try Task.checkCancellation()
             } catch {
                 managed.cancel()
-                // 취소된 태스크의 AsyncStream은 즉시 끝나므로 프로세스 종료는 별도로 기다린다.
+                // A cancelled task's AsyncStream ends immediately.
+                // Wait separately for the process to terminate.
                 await Task.detached { process.waitUntilExit() }.value
                 throw error
             }
@@ -66,8 +68,11 @@ private final class CancellableTranscriptionProcess: @unchecked Sendable {
     private let process: Process
     private var cancelled = false
 
+    /// Retains ownership so cancellation targets only the process created by this task.
     init(_ process: Process) { self.process = process }
 
+    /// Serializes launch and cancellation so a request cancelled just before launch
+    /// cannot leave a new process running.
     func start() throws {
         try lock.withLock {
             guard !cancelled else { throw CancellationError() }
@@ -75,6 +80,7 @@ private final class CancellableTranscriptionProcess: @unchecked Sendable {
         }
     }
 
+    /// Force-kills a runner that survives the termination signal so cleanup cannot wait indefinitely.
     func cancel() {
         lock.withLock {
             cancelled = true

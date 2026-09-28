@@ -40,6 +40,11 @@ initial runtime/model downloads; audio and transcripts still stay local. Qwen3 u
 `Alkd/Qwen3-ASR-1.7B-MLX-8bit` through the locked `runtime/qwen/` environment on
 Apple Silicon, with chunk timestamps identified in output metadata. Never claim
 those chunk boundaries are exact utterance or word timings.
+Video imports extract the first audio track and preserve its source timeline,
+including leading silence, internal gaps and the original media duration. Do not
+decode video frames or mix separate audio tracks. Reject video without an audio
+track; retain normal silent-audio success behavior. Temporary extracted audio is
+not a separately exported MP3 artifact.
 
 Live MCP controls live in `Sources/Scribird/Control/` and use the running app's
 `MeetingRecorder` and settings objects over a same-user Unix socket. Never create

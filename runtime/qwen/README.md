@@ -11,6 +11,11 @@ On first use it uses `uv` to prepare Python 3.12 under
 Python directly. `SCRIBIRD_UV_EXECUTABLE` overrides uv discovery, and
 `SCRIBIRD_QWEN_PYTHON` can point to an already prepared interpreter.
 
+Managed first-use preparation holds an exclusive local file lock. Concurrent
+requests reuse the completed environment, and interrupted or incomplete setup
+does not create the readiness marker. A ready environment works even if `uv` is
+subsequently unavailable.
+
 Hugging Face downloads the pinned model into its normal local cache, then the
 worker creates a local view under `~/Library/Application Support/Scribird/Qwen3/`
 without modifying the weights. Complete cached files are used without a Hub lookup.

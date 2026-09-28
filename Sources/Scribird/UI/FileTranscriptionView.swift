@@ -9,8 +9,8 @@ struct FileTranscriptionView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(tr("파일 전사", "Transcribe File"))
                 .font(.headline)
-            Text(tr("음성 파일을 기기에서 전사합니다. 화자는 구분하지 않습니다.",
-                    "Transcribe audio files on this Mac. Speakers are not identified."))
+            Text(tr("음성 파일과 MP4·MOV 영상의 오디오를 기기에서 전사합니다. 화자는 구분하지 않습니다.",
+                    "Transcribe audio files and the audio from MP4/MOV videos on this Mac. Speakers are not identified."))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -29,8 +29,7 @@ struct FileTranscriptionView: View {
                 .disabled(model.isRunning)
             }
             if model.engine == .qwen3 {
-                Text(tr("Apple Silicon 전용입니다. 처음 시작할 때 실행 환경과 모델(약 2.3GB)을 다운로드합니다. 시간 표시는 20초 이하 오디오 구간 기준입니다.",
-                        "Requires Apple Silicon. First use downloads the runtime and model (about 2.3 GB). Timestamps describe audio chunks of up to 20 seconds."))
+                Text(model.engine.setupNotice())
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

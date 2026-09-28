@@ -56,6 +56,16 @@
           "path": "docs/adr/transcription/0004-in-session-language-switch.md",
           "status": "Accepted (2026-08-21)",
           "summary": "설치된 회의 언어만 녹취 중 전환하고 캡처·회의 음성·회의록은 끊지 않으며 English는 필수 기본 모델로 유지한다"
+        },
+        {
+          "path": "docs/adr/transcription/0005-local-media-file-transcription.md",
+          "status": "Accepted (2026-09-28)",
+          "summary": "음성·영상 파일의 오디오를 로컬에서 전사하고 앱·CLI·MCP에 원본 시간축과 완료·부분 결과를 구분한 산출물을 제공한다"
+        },
+        {
+          "path": "docs/adr/transcription/0006-selectable-local-file-asr.md",
+          "status": "Accepted (2026-09-28)",
+          "summary": "파일 전사는 SpeechAnalyzer와 Alkd/Qwen3-ASR-1.7B-MLX-8bit를 선택하며 로컬 실행·사전 환경 안내·엔진별 시간 정밀도를 보장하고 자동 대체하지 않는다"
         }
       ],
       "dependsOn": [
