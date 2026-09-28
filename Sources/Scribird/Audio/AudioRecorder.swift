@@ -43,7 +43,7 @@ final class AudioRecorder: @unchecked Sendable {
     /// 아래 상태는 모두 `queue`에서만 접근한다.
     private var sink: Sink?
     private var sourceConverters: [Speaker: SourceConverter] = [:]
-    private var sourceNextFrame: [Speaker: Int64] = [:]
+    private var sourceTimelines: [Speaker: AudioRecordingTimeline] = [:]
     private var pendingBlocks: [Int64: MixBlock] = [:]
     private var nextWriteBlock: Int64 = 0
     private var latestEndFrame: Int64 = 0
@@ -80,9 +80,21 @@ final class AudioRecorder: @unchecked Sendable {
     ) {
         guard !failed else { return }
 
+        let existing = sourceConverters[speaker]
+        var timeline = sourceTimelines[speaker]
+            ?? AudioRecordingTimeline(sampleRate: Self.sampleRate)
+        let resetConverter = timeline.beginBuffer(
+            captureFrame: hostTime.flatMap { $0 > 0 ? captureFrame(at: $0) : nil },
+            inputFrames: Int(buffer.frameLength),
+            inputSampleRate: buffer.format.sampleRate,
+            formatChanged: existing?.captureFormat != buffer.format
+        )
+        // A converter can consume a tiny input without producing output yet.
+        // Keep its capture clock even when convert() returns nil.
+        defer { sourceTimelines[speaker] = timeline }
+
         let converter: AudioStreamConverter
-        if let existing = sourceConverters[speaker],
-           existing.captureFormat == buffer.format {
+        if let existing, !resetConverter {
             converter = existing.converter
         } else {
             guard let replacement = AudioStreamConverter(
@@ -106,46 +118,37 @@ final class AudioRecorder: @unchecked Sendable {
               let samples = converted.floatChannelData?[0]
         else { return }
 
-        let startFrame = framePosition(
-            for: speaker,
-            hostTime: hostTime,
-            frameCount: Int64(converted.frameLength)
-        )
+        let placement = timeline.place(outputFrames: Int(converted.frameLength))
         add(
             samples: samples,
             frameCount: Int(converted.frameLength),
-            at: startFrame
+            placement: placement
         )
 
-        latestEndFrame = max(latestEndFrame, startFrame + Int64(converted.frameLength))
+        latestEndFrame = max(latestEndFrame, placement.startFrame + Int64(placement.frameCount))
         flushBlocks(endingAtOrBefore: latestEndFrame - Self.reorderFrames)
     }
 
-    private func framePosition(
-        for speaker: Speaker,
-        hostTime: UInt64?,
-        frameCount: Int64
-    ) -> Int64 {
-        let start: Int64
-        if let hostTime, hostTime > 0 {
-            let origin = AVAudioTime.seconds(forHostTime: originHostTime)
-            let current = AVAudioTime.seconds(forHostTime: hostTime)
-            start = max(0, Int64(((current - origin) * Self.sampleRate).rounded()))
-        } else {
-            start = sourceNextFrame[speaker] ?? 0
-        }
-        sourceNextFrame[speaker] = start + frameCount
-        return start
+    private func captureFrame(at hostTime: UInt64) -> Double {
+        // Subtract ticks before conversion to avoid cancellation after long
+        // system uptime. Negative positions are trimmed, not shifted to zero.
+        let ticks = hostTime >= originHostTime
+            ? hostTime - originHostTime : originHostTime - hostTime
+        let frames = AVAudioTime.seconds(forHostTime: ticks) * Self.sampleRate
+        return hostTime >= originHostTime ? frames : -frames
     }
 
     private func add(
         samples: UnsafePointer<Float>,
         frameCount: Int,
-        at startFrame: Int64
+        placement: AudioRecordingTimeline.Placement
     ) {
-        for index in 0..<frameCount {
-            let absoluteFrame = startFrame + Int64(index)
-            guard absoluteFrame >= 0 else { continue }
+        let discardBefore = max(placement.discardBefore, nextWriteBlock * Self.blockFrames)
+        for index in 0..<placement.frameCount {
+            let absoluteFrame = placement.startFrame + Int64(index)
+            // Never mix the same source twice or recreate an already flushed
+            // block when a capture callback arrives outside the reorder window.
+            guard absoluteFrame >= discardBefore else { continue }
             let block = absoluteFrame / Self.blockFrames
             let offset = Int(absoluteFrame % Self.blockFrames)
             let mixed: MixBlock
@@ -156,7 +159,15 @@ final class AudioRecorder: @unchecked Sendable {
                 pendingBlocks[block] = created
                 mixed = created
             }
-            mixed.samples[offset] += samples[index]
+            if placement.frameCount == frameCount {
+                mixed.samples[offset] += samples[index]
+            } else {
+                let position = Double(index) * Double(frameCount) / Double(placement.frameCount)
+                let lower = Int(position)
+                let upper = min(lower + 1, frameCount - 1)
+                let fraction = Float(position - Double(lower))
+                mixed.samples[offset] += samples[lower] + (samples[upper] - samples[lower]) * fraction
+            }
         }
     }
 
@@ -294,7 +305,7 @@ final class AudioRecorder: @unchecked Sendable {
     private func resetForNextSession() {
         sink = nil
         sourceConverters.removeAll()
-        sourceNextFrame.removeAll()
+        sourceTimelines.removeAll()
         pendingBlocks.removeAll()
         nextWriteBlock = 0
         latestEndFrame = 0
