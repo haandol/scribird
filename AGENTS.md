@@ -277,7 +277,10 @@ types, `lowerCamelCase` for properties and functions, and descriptive enum cases
 primary type per file and place code in the existing domain folder. Prefer structured
 concurrency and explicit actor isolation.
 
-Comments are in Korean, as is user-facing UI text and all error messages. Comment only
+All code comments must be written in English. Write developer-facing explanations in English.
+Keep user-facing UI text
+and error messages localized in Korean and English. Preserve original-language transcript
+samples and quoted evidence when their exact wording matters. Comment only
 non-obvious audio, timing, permission, or language-arbitration behavior — and when the
 reason is an empirical finding, record the measurement rather than just the conclusion.
 That convention is why the invariants above are recoverable. No formatter or linter is
@@ -366,9 +369,8 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
   governs both. `plugin` and `build` exist outside that mapping, having no ADR. Omit the scope
   only when a change genuinely spans everything.
 - **Subject**: English, lowercase, imperative, no trailing period, ≤72 characters.
-  English here while comments and ADRs stay Korean is deliberate: the log is read truncated
-  and searched through `git log` and GitHub, whereas comments are read in place by whoever
-  maintains the audio path.
+  Keep subjects concise because the log is read truncated and searched through `git log`
+  and GitHub. Comments also use English; existing Korean ADRs retain their language.
 
 Bodies explain *why*, and **when a change came from a measurement they include the numbers
 and the failure mode that was ruled out.** Keep that standard — this history is the project's

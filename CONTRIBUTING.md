@@ -310,7 +310,10 @@ existing domain folder. Prefer structured concurrency and explicit actor isolati
 **Never weaken Swift 6 concurrency checking** to resolve a data-race diagnostic. Audio
 callbacks run off the main actor; use the existing lock and handoff patterns.
 
-Comments are in Korean, as is all user-facing text and every error message. Comment only
+All code comments must be written in English. Write developer-facing explanations in English.
+Keep user-facing UI text
+and error messages localized in Korean and English. Preserve original-language transcript
+samples and quoted evidence when their exact wording matters. Comment only
 non-obvious audio, timing, permission, or language-arbitration behavior — and when the reason
 is an empirical finding, **record the measurement, not just the conclusion**. That convention
 is why the invariants in `AGENTS.md` are recoverable at all. No formatter or linter is
@@ -377,10 +380,9 @@ instance.
 - No trailing period
 - Aim for 50 characters, 72 is the hard limit
 
-English subjects with Korean comments and ADRs is deliberate, not an oversight. The commit log
-is read through `git log`, `gh`, and GitHub's UI where the subject is often truncated and
-searched; comments and ADRs are read in place, in full, by the people maintaining the audio
-path. The two audiences differ, so the language does too.
+Keep subjects concise because the commit log is read through `git log`, `gh`, and GitHub's
+UI, where the subject is often truncated and searched. Comments also use English;
+existing Korean ADRs retain their language.
 
 ### Body (optional)
 
