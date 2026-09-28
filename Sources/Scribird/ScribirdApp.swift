@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 
-@main
 struct ScribirdApp: App {
     /// 앱 시작 시점에 상태와 창을 준비한다.
     ///
@@ -78,6 +77,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updateChecker = UpdateChecker()
     let languageSettings = AppLanguageSettings()
     private var microphoneMuteMonitor: Any?
+    private lazy var control = AppControl(
+        recorder: recorder, languageSettings: languageSettings,
+        hotKeySettings: hotKeySettings, settingsHotKeySettings: settingsHotKeySettings,
+        microphoneMuteHotKeySettings: microphoneMuteHotKeySettings, updateChecker: updateChecker,
+        showWindow: { [weak self] window in
+            guard let self else { return }
+            switch window {
+            case "settings": self.windows.showSettings()
+            case "file_transcription": FileTranscriptionWindow.shared.show(languageSettings: self.languageSettings)
+            default: self.windows.showTranscript()
+            }
+        }
+    )
+    private lazy var controlServer = LocalControlServer(
+        handle: { [weak self] request in
+            guard let self else { return .failure(tr("Scribird를 종료하고 있습니다.", "Scribird is shutting down.")) }
+            return await self.control.handle(request)
+        },
+        reportError: { [weak self] error in self?.control.connectionError = error }
+    )
     lazy var windows = WindowCoordinator(
         recorder: recorder,
         hotKeySettings: hotKeySettings,
@@ -94,6 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 사용자가 메뉴바를 열지 않아도 단축키가 준비돼 있어야 한다.
         windows.activateHotKey()
+        do { try controlServer.start() }
+        catch { control.connectionError = error.localizedDescription }
         microphoneMuteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
             [weak recorder, weak microphoneMuteHotKeySettings] event in
             guard microphoneMuteHotKeySettings?.matches(event) == true,
@@ -106,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        controlServer.stop()
         if let microphoneMuteMonitor {
             NSEvent.removeMonitor(microphoneMuteMonitor)
         }
@@ -167,5 +189,9 @@ final class WindowCoordinator {
 
     func showSettings() {
         settingsWindow.show()
+    }
+
+    func showTranscript() {
+        transcriptWindow.show()
     }
 }

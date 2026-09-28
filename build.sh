@@ -25,6 +25,10 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources"
 cp "$BINARY" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 cp Resources/Info.plist "${APP_BUNDLE}/Contents/Info.plist"
+mkdir -p "${APP_BUNDLE}/Contents/Resources/QwenRuntime"
+for ASSET in pyproject.toml uv.lock transcribe.py preprocessor_config.json; do
+    cp "runtime/qwen/${ASSET}" "${APP_BUNDLE}/Contents/Resources/QwenRuntime/${ASSET}"
+done
 
 echo "==> 앱 아이콘 생성"
 rm -rf "$ICONSET"

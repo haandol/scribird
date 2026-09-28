@@ -16,7 +16,8 @@ and not that one.
 ## Project Structure & Module Organization
 
 `Scribird` is a Swift 6.2+ macOS 26 menu-bar application. All transcription and storage
-happens on-device; nothing leaves the machine. Application code lives under
+happens on-device; the app does not upload meeting data. Explicit MCP reads return
+requested text to the configured client. Application code lives under
 `Sources/Scribird/`:
 
 - `Audio/`: microphone capture (`AVAudioEngine`), system-audio capture (Core Audio
@@ -28,6 +29,25 @@ happens on-device; nothing leaves the machine. Application code lives under
 - `UI/`: the SwiftUI transcript view, the settings window, the floating window,
   global-hotkey registration, and the update check.
 - `MeetingRecorder.swift`: application state and pipeline orchestration.
+
+File imports use a separate file-transcription pipeline and archive, entered through
+the **Transcribe File** window or `Scribird --transcribe`. The stdio MCP adapter is
+in `mcp/`; see [`mcp/README.md`](./mcp/README.md) for inputs, saved-result contracts
+and client configuration. File imports must not open capture devices, alter live
+model reservations, overwrite existing output or label imported voices `me`/`remote`.
+SpeechAnalyzer requires installed Speech models. Selecting Qwen3 explicitly permits
+initial runtime/model downloads; audio and transcripts still stay local. Qwen3 uses
+`Alkd/Qwen3-ASR-1.7B-MLX-8bit` through the locked `runtime/qwen/` environment on
+Apple Silicon, with chunk timestamps identified in output metadata. Never claim
+those chunk boundaries are exact utterance or word timings.
+
+Live MCP controls live in `Sources/Scribird/Control/` and use the running app's
+`MeetingRecorder` and settings objects over a same-user Unix socket. Never create
+an independent live recorder in the MCP process or change preferences without
+updating the app state. Expose failed changes as tool errors. Transcript reads return
+content to the configured MCP client; Scribird itself does not upload that content.
+Session-folder allocation must not reuse an existing folder, including two sessions
+started within the same second. Keep these contracts in `mcp/README.md`.
 
 Bundle metadata, entitlements, and the editable app icon are in `Resources/`. Generated
 artifacts belong in `.build/` and `build/`; do not edit or commit them as source.
@@ -214,12 +234,15 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   text pass or fail depending on the system language of whoever runs them. Pass the language
   explicitly, or assert the rule (two labels differ, four buttons are distinct) instead of the
   words.
-- **Network use has one launch-time system-asset exception.** English is the mandatory
+- **Network use includes system assets and user-selected Qwen3 setup.** English is the mandatory
   default transcription language, so when its Speech asset is absent the app asks macOS to
-  install it at launch. Korean remains user-initiated from settings. The update check is the
-  only app-owned external lookup and fires only from its button; do not add launch or periodic
+  install it at launch. Korean remains user-initiated from settings or `install_speech_model`. The update check is the
+  only release lookup and fires only from its button or `check_for_updates`; do not add launch or periodic
   release checks. No request may carry app-produced data: no transcript, usage counts, audio,
   or device id.
+  Starting a file import with Qwen3 may download its pinned Python runtime and the
+  specified model. The UI must disclose that first-use download. Reuse the prepared
+  environment and cached weights on subsequent runs; never upload input audio.
 - **Compare versions positionally.** String comparison ranks `0.10.0` below `0.9.0`, so a
   user on 0.9.0 is never told about the 0.10.0 release. Read the running version from the
   bundle rather than a constant in code, or the two drift apart.
@@ -280,8 +303,9 @@ Two conventions matter more than coverage here:
   invariant in the source and confirm the test fails. Several tests here initially passed
   against deliberately broken code because the input did not actually exercise the rule.
 
-`TranscriptStore` writes under `~/Documents`, so its tests override `HOME` to a temporary
-directory. Follow that pattern for anything else touching the real filesystem.
+`TranscriptStore` accepts an explicit output root. Tests must pass a temporary directory
+directly and assert that output stays within it. Changing `HOME` alone does not redirect
+macOS's Documents-folder lookup. Apply explicit path injection to filesystem tests.
 
 `LanguageArbiter.arbitrate` and `AudioLevelTracker` are `@MainActor`/actor-isolated; test
 classes need matching isolation rather than weakened source annotations.

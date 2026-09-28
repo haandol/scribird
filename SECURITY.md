@@ -22,8 +22,10 @@ disk, so the interesting failures are about that content escaping or those permi
 borrowed. In particular:
 
 - **Meeting data leaving the device.** macOS may download the mandatory English Speech asset
-  at app launch, and Korean only after an install action in settings. The release lookup
-  still runs only from *새 버전 확인*. Anything that attaches app-produced data (audio,
+  at app launch, and Korean only after an install action in settings or `install_speech_model`. The release lookup
+  still runs only from *새 버전 확인* or the explicit `check_for_updates` MCP tool. Explicitly selecting Qwen3 for a file import may
+  download its locked runtime and pinned Hugging Face model, with no audio uploads.
+  Anything that attaches app-produced data (audio,
   transcript text, usage counts, or a device identifier) to any request is a vulnerability
   request.
 - **Escalating the permissions Scribird already holds.** The app requests microphone and
@@ -52,3 +54,16 @@ borrowed. In particular:
   point they can read `~/Documents` directly, without Scribird.
 - **The two-speaker attribution ceiling**, or recognition accuracy generally. Those are
   documented limitations.
+
+## Local MCP control
+
+The running app listens on a Unix socket in a directory owned by the current user
+with mode 0700. It does not expose a network port. Live tools share the app's recorder
+and settings; file transcription uses a separate worker. MCP transcript tools return
+requested text to the configured client. Subsequent client use of that text is outside
+Scribird; returning requested text locally is distinct from an app-owned external upload.
+
+The control protocol does not grant macOS permissions, run arbitrary shell commands,
+install app releases, delete archives or terminate the app. Unknown commands and inputs
+are rejected. Multiple discovered instances require explicit socket selection so an
+agent does not silently control a different recording.

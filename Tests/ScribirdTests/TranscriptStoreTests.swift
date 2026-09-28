@@ -7,34 +7,26 @@ import XCTest
 /// 검증 대상 계약: 확정 발화만 기록된다 / 확정 즉시 디스크에 남아 크래시에도
 /// 살아남는다 / 읽기용 회의록은 화자·언어 경계에서 단락이 끊긴다.
 ///
-/// 실제 홈 디렉터리를 오염시키지 않으려고 `HOME`을 임시 디렉터리로 바꿔 실행한다.
-/// 저장 위치가 `~/Documents` 기준이므로 이 방법이 유일하게 격리된다.
+/// macOS의 문서 폴더 조회는 HOME 변경만으로 격리되지 않아 임시 저장 루트를 직접 전달한다.
 final class TranscriptStoreTests: XCTestCase {
 
     private var sandbox: URL!
-    private var originalHome: String?
 
     override func setUpWithError() throws {
         sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "scribird-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
-        originalHome = ProcessInfo.processInfo.environment["HOME"]
-        setenv("HOME", sandbox.path, 1)
     }
 
     override func tearDownWithError() throws {
-        if let originalHome { setenv("HOME", originalHome, 1) }
         try? FileManager.default.removeItem(at: sandbox)
     }
 
-    /// 기본 저장 루트에 세션을 연다.
-    ///
-    /// `HOME`을 임시 디렉터리로 바꿔 두었으므로 기본 위치가 그 안으로 들어온다 — 저장 루트를
-    /// 사용자가 고를 수 있게 된 뒤에도 이 테스트들이 검증하는 것은 기본 위치의 동작이다.
+    /// 이 테스트가 소유한 임시 폴더에만 세션을 연다.
     private func makeStore(startedAt: Date = Date()) throws -> TranscriptStore {
         try TranscriptStore(
             startedAt: startedAt,
-            root: TranscriptRootLocation.standardDirectory()
+            root: sandbox.appending(path: "Scribird", directoryHint: .isDirectory)
         )
     }
 
@@ -56,6 +48,34 @@ final class TranscriptStoreTests: XCTestCase {
     }
 
     // MARK: - 즉시 append (크래시 내구성)
+
+    func test_sessionOutput_isConfinedToTemporaryRoot() async throws {
+        let store = try makeStore()
+        let directory = await store.finalize(audioFiles: [])
+        XCTAssertEqual(directory.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL,
+                       sandbox.standardizedFileURL)
+    }
+
+    func test_sameSecondSessions_doNotOverwriteExistingTranscriptOrAudio() async throws {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = try makeStore(startedAt: date)
+        await first.append(segment(.me, "previous session", 0, 1))
+        let firstDirectory = await first.finalize(audioFiles: [])
+        let originalJSONL = try Data(contentsOf: firstDirectory.appending(path: "transcript.jsonl"))
+        let originalMarkdown = try Data(contentsOf: firstDirectory.appending(path: "transcript.md"))
+        let audio = firstDirectory.appending(path: "meeting.m4a")
+        try Data("existing audio".utf8).write(to: audio)
+
+        let second = try makeStore(startedAt: date)
+        await second.append(segment(.remote, "next session", 0, 1))
+        let secondDirectory = await second.finalize(audioFiles: [])
+
+        XCTAssertNotEqual(firstDirectory, secondDirectory)
+        XCTAssertEqual(try Data(contentsOf: firstDirectory.appending(path: "transcript.jsonl")), originalJSONL)
+        XCTAssertEqual(try Data(contentsOf: firstDirectory.appending(path: "transcript.md")), originalMarkdown)
+        XCTAssertEqual(try Data(contentsOf: audio), Data("existing audio".utf8))
+        XCTAssertEqual(try jsonlLines(secondDirectory).first?["text"] as? String, "next session")
+    }
 
     func test_finalSegment_isOnDiskBeforeSessionEnds() async throws {
         let store = try makeStore()

@@ -17,10 +17,23 @@ Scribird writes down your Zoom or Teams meeting while it happens. Your microphon
 labeled **me**, whatever comes out of your speakers is labeled **remote**, and when the
 meeting ends you are left with a transcript and the meeting audio in a single folder.
 
-Transcription and storage both happen on your machine. **Neither the meeting audio nor the
-transcript ever leaves the device.** macOS may download the mandatory English Speech asset
-at launch, and the app checks for releases only when you press *Check for updates* — see
-[Network use](#network-use).
+You can also [transcribe an existing MP3, M4A or other audio file](mcp/file-transcription.md)
+from **Transcribe File** in the app, the command line, or the local
+`transcribe_audio` MCP tool. File imports support English or Korean and save timed
+JSONL and Markdown transcripts; imported speakers are marked `unknown`. Choose
+**SpeechAnalyzer** or **Qwen3 ASR** for file imports. Qwen3 uses
+[Alkd/Qwen3-ASR-1.7B-MLX-8bit](https://huggingface.co/Alkd/Qwen3-ASR-1.7B-MLX-8bit)
+on Apple Silicon and downloads its runtime and model on first use.
+
+The [local MCP server](mcp/README.md) also controls live recording, meeting language
+(English, Korean, or both), microphone mute, devices and settings, and reads current
+or saved transcripts. It connects to the running app without keyboard/mouse control.
+
+Transcription and storage both happen on your machine. **Scribird does not upload
+meeting audio or transcripts.** Transcript tools return text to the configured MCP
+client, whose own handling of that text is outside Scribird. macOS may download the
+mandatory English Speech asset at launch. Release checks run only when you press
+*Check for updates* or call `check_for_updates`; see [Network use](#network-use).
 
 The interface is available in **Korean and English**, following your system language by default
 and switchable in settings. The screenshots below use the English interface and fixed,
@@ -30,8 +43,8 @@ non-identifying mock meeting data rendered by the real SwiftUI components.
 > A separate, opt-in [plugin](#optional-splitting-remote-into-individual-speakers) for Claude
 > Code and Codex can split *remote* in legacy source-separated sessions into individual
 > participants afterwards. It sends the saved audio to **your own** AWS account, so it is
-> deliberately outside the app. Scribird itself only asks macOS for the mandatory English
-> Speech asset at launch; release lookup remains user-initiated.
+> deliberately outside the app. For the app's model setup and release checks, see
+> [Network use](#network-use).
 
 <div align="center">
   <img src="docs/images/transcript.png" width="520" alt="Scribird transcript window in English: recording status, microphone mute control, per-source level meters, and a mock conversation with Me aligned right and Remote aligned left" />
@@ -47,6 +60,7 @@ it is still volatile — the moment it is finalized it sharpens and is written t
 |---|---|
 | **Automatic speaker attribution** | Microphone is *me*, system output is *remote*. The audio path decides the speaker, so there is nothing to infer and nothing to get wrong |
 | **Live transcription** | Volatile text appears dimmed while you speak and sharpens once finalized. Finalized text is written to disk immediately |
+| **Local file ASR** | Transcribe MP3, M4A, WAV and other audio files with SpeechAnalyzer or Qwen3 ASR. Use the app, CLI or MCP; audio stays on your Mac |
 | **Korean + English** | Both languages are recognized at once. Code-switching meetings keep both sides thanks to token-level arbitration |
 | **Switch language mid-meeting** | Pick any installed meeting language from the transcript window while recording. The audio and transcript continue — only the transcribers change |
 | **Meeting audio kept** | Microphone and system output are mixed live into one mono `meeting.m4a` for natural playback and later re-transcription |
@@ -64,8 +78,11 @@ macOS 26 or later, on Apple silicon or Intel. The on-device `SpeechAnalyzer` API
 Scribird is built on does not exist on earlier releases, so there is no back-deployed
 build.
 
-The English language model is mandatory. If it is missing, macOS downloads it when Scribird
-starts. Korean is optional and can be installed from settings.
+Live recording requires the English Speech model. If it is missing, macOS downloads it
+when Scribird starts. Korean is optional and can be installed from settings or through the MCP tool
+`install_speech_model`. Qwen3 file
+transcription uses its own model and additionally requires Apple Silicon and `uv`;
+see [Local Qwen3 ASR](#local-qwen3-asr-for-audio-files).
 
 ## Installation
 
@@ -129,6 +146,115 @@ identifier.
 4. When the meeting changes, press **✎** to cut the transcript. Capture is not interrupted.
 5. Press **Stop**. It wraps up within 6 seconds and shows a link to the output folder.
 
+### Control Scribird through MCP
+
+MCP (Model Context Protocol) lets an agent call Scribird's recording, settings and
+transcript functions. The local server exposes **23 tools**. Live controls use the
+running app's recorder and settings, so changes also appear in its interface.
+
+Build and launch the current app as described in [From source](#from-source), then
+install the adapter dependencies from the repository root:
+
+```bash
+uv sync --project mcp --frozen
+```
+
+Configure your MCP client to start this standard input/output (stdio) command,
+replacing the directory with your checkout's absolute path:
+
+```bash
+uv run --directory /absolute/path/to/scribird/mcp --frozen python server.py
+```
+
+Use the absolute path to `uv` if it is missing from the client's PATH. Reconnect the
+MCP server after adding it. See the [connection guide](mcp/README.md#connection-and-app-lifecycle)
+for client configuration, executable selection, multiple app instances and timeouts.
+
+| Responsibility | Available controls |
+|---|---|
+| **Live recording** | Start/stop, split sessions, change meeting language, and mute/unmute the microphone |
+| **Settings and devices** | Read/change recording preferences, output folder, interface language, shortcuts and capture devices; inspect/install speech models |
+| **Transcripts** | Read current or saved transcripts, list sessions, and transcribe local audio files |
+| **App access** | Launch the app, read status and warnings, show windows, dismiss errors, and request a release check |
+
+For a meeting using both Korean and English:
+
+1. Call `launch_app` if needed, then `get_speech_models`. If a required model is
+   missing, call `install_speech_model` and poll until installation finishes.
+2. Call `start_recording` with `{"language":"auto"}`. Here **`auto` means Korean +
+   English together** and requires both models. The other choices are `korean` and
+   `english`.
+3. To change recognition during recording, call `set_recording_language`, for
+   example with `{"language":"korean"}`. Capture and the current session continue.
+4. Call `stop_recording` to finalize the files. Its response identifies the saved
+   session, which you can inspect with `read_session`.
+
+`set_interface_language` changes screen text only. Audio-retention and output-folder
+settings are locked during startup, recording and finalization; the meeting language
+can change during recording.
+File transcription accepts one language per file, `english` or `korean`, and does not
+use live `auto` mode.
+
+Control requests use a Unix socket accessible only to the current user. They do not
+need browser, keyboard or mouse automation. After a timeout, read `get_app_status`
+before repeating a change: the app may still finish the original operation. The
+[tool guide](mcp/README.md) documents each input, result and restriction.
+
+### Local Qwen3 ASR for audio files
+
+ASR means automatic speech recognition: converting speech into text. Click
+**Transcribe File** in the transcript window, select an MP3, M4A, WAV, AIFF or CAF
+file, and choose **Qwen3 ASR (MLX 8-bit)** or **SpeechAnalyzer** under **ASR engine**.
+Choose **English** or **Korean**, then click **Transcribe**.
+
+| Engine | Required setup | Time information |
+|---|---|---|
+| **SpeechAnalyzer** — default | macOS 26+ and the selected Speech model installed through Scribird settings | Utterance time ranges |
+| **Qwen3 ASR** — local MLX | Apple Silicon, macOS 26+, and `uv`; Scribird prepares Python/MLX and the model on first use | Input chunks of up to 20 seconds, not exact utterance or word boundaries |
+
+**Scribird installation alone does not complete Qwen3 setup.** Install
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/) first. If you use
+Homebrew:
+
+```bash
+brew install uv
+```
+
+On the first Qwen3 transcription, Scribird uses `uv` to create a private **Python
+3.12** environment with the locked MLX dependencies and download
+**[Alkd/Qwen3-ASR-1.7B-MLX-8bit](https://huggingface.co/Alkd/Qwen3-ASR-1.7B-MLX-8bit)**
+(approximately 2.3 GB). You do not need to install Python or MLX system-wide. The
+runtime lives under `~/Library/Application Support/Scribird/QwenRuntime/`; model
+weights use the local Hugging Face cache. This first setup needs internet access.
+After it completes, transcription works offline without uploading audio or text.
+
+For CLI use, point at the installed app's executable:
+
+```bash
+/Applications/Scribird.app/Contents/MacOS/Scribird \
+  --transcribe "/absolute/path/meeting.mp3" \
+  --engine qwen3 \
+  --language korean
+```
+
+The same engine is available through the **`transcribe_audio` MCP tool**. After
+[connecting the MCP server](mcp/README.md#connection-and-app-lifecycle), pass:
+
+```json
+{
+  "file_path": "/absolute/path/meeting.mp3",
+  "engine": "qwen3",
+  "language": "korean"
+}
+```
+
+Each file import saves `transcript.jsonl`, `transcript.md` and `result.json` in a new
+`import-<UUID>` folder. Imported speakers are `unknown`; file transcription does
+not identify individual speakers. The original audio is unchanged. Engine selection
+here applies to file imports; live meeting recording continues to use SpeechAnalyzer.
+See the [full file transcription guide](mcp/file-transcription.md) for output locations, cancellation,
+timeouts and runtime overrides.
+
 ### Reading the level meters
 
 The shaded band is the recommended range, **-24 to -3 dBFS**. Below -24 the source is too
@@ -172,7 +298,9 @@ stay editable because they do not alter the live capture or archive.
 
 ## Where your data goes
 
-Each session gets its own directory, named for the moment it started:
+Each session gets its own directory, named for the moment it started. If two
+sessions start within the same second, the later one gets a unique suffix so it
+cannot overwrite the first:
 
 ```
 ~/Documents/Scribird/2026-07-31_142530/
@@ -211,12 +339,17 @@ from it.
 ### Network use
 
 When the mandatory English Speech asset is absent, Scribird asks macOS to install it at
-launch. Korean is downloaded only after you press its install button in settings. These
-system asset requests never include meeting audio, transcripts, usage counts, or a device
-identifier.
+launch. Korean is downloaded only after an install action in settings or an explicit
+`install_speech_model` MCP call. These system asset requests never include meeting
+audio, transcripts, usage counts, or a device identifier.
 
-The release lookup behind *Check for updates* fires only from that button
-press. There is no launch or periodic release check. Scribird never downloads an update
+Starting a file import with Qwen3 may download its Python/MLX runtime and model from
+package registries and Hugging Face. [First-use setup](#local-qwen3-asr-for-audio-files)
+is initiated by the user; subsequent runs reuse local files. The worker disables
+Hugging Face telemetry and never uploads the input audio or transcript.
+
+The release lookup runs only when you press *Check for updates* or call the
+`check_for_updates` MCP tool. There is no launch or periodic release check. Scribird never downloads an update
 either — it points you at the release page. Release downloads are not notarized, so follow
 the first-launch steps in [Installation](#from-a-release).
 
@@ -463,8 +596,9 @@ Knowing them up front saves some surprise.
 - **If the meeting is monolingual, picking that one language is more accurate.** In a
   multilingual configuration, utterances at a code-switching boundary can be clipped short.
   Choosing a single language skips the arbiter entirely, so that loss doesn't occur.
-- **Language and original-audio saving are locked while recording.** Changing them would
-  contradict the transcribers and file handles that already exist.
+- **Original-audio saving and the output folder are locked while recording.** They
+  determine the files already open for the session. Meeting language remains changeable
+  through the interface or `set_recording_language`, provided the required models are installed.
 - **Stop completes within 6 seconds.** The transcript and audio files must be saved even if
   one transcriber stops responding, so past that deadline the remaining tasks are cancelled
   and whatever was secured is written out.
@@ -518,6 +652,34 @@ bundle that declares only `NSAudioCaptureUsageDescription` fails with `-3801
 The reasoning behind each decision and the alternatives that were rejected are recorded in
 the repository's ADR index. If you want to know *why* something is the way it is, that is the
 primary source. The ADRs are written in Korean.
+
+### MCP control flow
+
+The adapter in `mcp/live_tools.py` declares the public tools; `mcp/app_client.py`
+handles their local socket connection. In the app, `ControlCommand` defines supported
+commands, accepted input keys and which requests change state. `AppControl` validates
+and dispatches them to recording, settings or status handlers. These handlers share
+the app's existing recorder; they do not create a second live capture pipeline.
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP client
+    participant Adapter as Local Python adapter
+    participant App as Scribird app control
+    participant Recorder as Existing recorder
+    Client->>Adapter: Change meeting language
+    Adapter->>App: Unix socket request
+    App->>App: Validate request and prevent overlapping changes
+    App->>Recorder: Apply language change
+    Recorder-->>App: Operation completed
+    App-->>Adapter: Current state or error
+    Adapter-->>Client: Structured result
+```
+
+Only one MCP change runs at a time; status and transcript reads remain available.
+The app clears the pending-operation marker before returning a completed state.
+File imports use a separate local worker and retain their own cancellation and output
+contracts. See [CONTRIBUTING.md](CONTRIBUTING.md) for regression and MCP integration tests.
 
 ## Contributing
 

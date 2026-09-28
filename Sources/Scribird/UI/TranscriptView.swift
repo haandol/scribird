@@ -538,6 +538,13 @@ struct TranscriptView: View {
             }
 
             HStack(spacing: 12) {
+                Button {
+                    FileTranscriptionWindow.shared.show(languageSettings: languageSettings)
+                } label: {
+                    Label(tr("파일 전사", "Transcribe File"), systemImage: "doc.badge.waveform")
+                }
+                .buttonStyle(.link)
+
                 Spacer()
 
                 Text(tr("\(recorder.segments.count)개 발화", "\(recorder.segments.count) utterances"))

@@ -10,6 +10,54 @@ usually a bug that produces *silence* rather than an error.
 
 ## Running the app in Xcode or from the command line
 
+The [file transcription guide](mcp/README.md) covers the app, headless CLI and MCP
+adapter. Run its tests without audio hardware or network calls:
+
+```bash
+swift test --filter 'FileTranscriptionCommandTests|FileTranscriptArchiveTests|FileTranscriptionViewTests'
+uv run --project mcp --frozen python -m unittest discover -s mcp/tests -v
+```
+
+Integration cases are opt-in. Generate a non-identifying English fixture with
+`say`, convert it to MP3 with a locally installed `ffmpeg`, and set
+`SCRIBIRD_FILE_FIXTURE` to its absolute path. The expected speech is:
+“This is a local audio transcription test. The project meeting starts tomorrow
+morning. Please save the final transcript.” Install the English Speech model before
+testing. `mcp/tests/test_stdio.py` also exercises sibling `sample.wav`, `sample.m4a`,
+`sample.aiff`, `sample.caf`, `silence.wav`, and `korean.mp3` when present; the Korean
+fixture should include “프로젝트” and “마지막”. Build the current bundle before MCP
+integration tests. Keep generated audio and results under ignored `build/`.
+
+Set `SCRIBIRD_FILE_SCREENSHOTS` to an ignored output directory to render the file
+window and its entry point in both languages. These captures do not focus a window.
+
+Qwen3 integration tests require a prepared runtime and cached model. Set
+`SCRIBIRD_QWEN_TESTS=1`, `HF_HUB_OFFLINE=1`, and `SCRIBIRD_QWEN_PYTHON` to the prepared
+Python executable alongside the fixture variable. Prepare/download with a normal
+CLI Qwen3 call before testing; the opt-in tests must run offline. The bundled Qwen3
+runtime comes from `runtime/qwen/` and its `uv.lock`, without including `.venv` or
+model weights in the app. Model and feature-extractor provenance is recorded in
+[`runtime/qwen/README.md`](runtime/qwen/README.md).
+
+The [MCP control guide](mcp/README.md) covers live recording, settings and archive
+reads. Live controls must call the running app's existing recorder/settings over the
+private Unix socket; never start a separate live recorder or edit only its plist.
+Return failed changes as errors and retain existing output, including same-second
+session-folder collisions. Run the transport integration with generated in-memory
+capture/transcription sources, without microphone access or network requests:
+
+```bash
+SCRIBIRD_MCP_INTEGRATION=1 swift test --filter MeetingRecorderLifecycleTests
+uv run --directory mcp --frozen python -m unittest discover -s tests -v
+```
+
+`test_mcpStdioClient_controlsRealRecorderOverUnixSocket` launches a real Python MCP
+client/server against a Swift control socket and the normal recorder. Only speech and
+capture are replaced. It verifies bilingual selection, language switches, same-second
+session rotation, saved-file reads and rejected state changes. Hardware-switch tests
+are separate; use `swift test --skip 'AudioDeviceMonitorTests|AudioDeviceSwitchNotificationTests'` when other work needs the
+Mac's audio devices left in place. Transcript tools return text to the configured client.
+
 Scribird is a Swift Package with no external dependencies. The required macOS and Swift
 versions are declared in `Package.swift`.
 
@@ -92,8 +140,9 @@ Some traps that are easy to hit here:
 - **`Bundle.main` under `swift test` is the test runner, not the app**, so it reports the
   macOS version instead of the app's. Inject the version being compared rather than reading
   the bundle.
-- **Anything writing under the real home directory must redirect it** to a temporary one.
-  The transcript-store tests override `HOME`; follow that pattern.
+- **Filesystem tests must pass an explicit temporary output root** and assert that output
+  stays within it. Changing `HOME` alone does not redirect macOS's Documents-folder lookup;
+  the transcript-store tests inject their own directory instead.
 - **Match the source's actor isolation in the test class** instead of weakening the source
   annotation to make a test compile.
 - **The device-switch tests are the one exception to "no hardware":** they change the real

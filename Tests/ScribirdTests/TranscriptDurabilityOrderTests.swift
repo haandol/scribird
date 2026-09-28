@@ -20,26 +20,22 @@ import XCTest
 final class TranscriptDurabilityOrderTests: XCTestCase {
 
     private var sandbox: URL!
-    private var originalHome: String?
 
     override func setUpWithError() throws {
         sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "scribird-order-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
-        originalHome = ProcessInfo.processInfo.environment["HOME"]
-        setenv("HOME", sandbox.path, 1)
     }
 
     override func tearDownWithError() throws {
-        if let originalHome { setenv("HOME", originalHome, 1) }
         try? FileManager.default.removeItem(at: sandbox)
     }
 
-    /// 기본 저장 루트에 세션을 연다. `HOME`을 임시 디렉터리로 바꿔 두었으므로 그 안으로 들어온다.
+    /// 이 테스트가 소유한 임시 폴더에만 세션을 연다.
     private func makeStore() throws -> TranscriptStore {
         try TranscriptStore(
             startedAt: Date(),
-            root: TranscriptRootLocation.standardDirectory()
+            root: sandbox.appending(path: "Scribird", directoryHint: .isDirectory)
         )
     }
 

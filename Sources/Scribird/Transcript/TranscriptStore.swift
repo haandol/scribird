@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// 확정된 세그먼트를 디스크에 즉시 append 한다.
@@ -23,14 +24,23 @@ actor TranscriptStore {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let name = formatter.string(from: startedAt)
 
-        sessionDirectory = root.appending(path: name, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
-            at: sessionDirectory,
+            at: root,
             withIntermediateDirectories: true
         )
+        // MCP에서 같은 초에 세션을 분리하면 기존 이름과 충돌한다. mkdir의 원자적 생성으로
+        // 폴더를 확보하고, 충돌 때만 접미사를 붙여 기존 회의록·오디오를 덮어쓰지 않는다.
+        var candidate = root.appending(path: name, directoryHint: .isDirectory)
+        while mkdir(candidate.path, 0o700) != 0 {
+            guard errno == EEXIST else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            candidate = root.appending(path: "\(name)-\(UUID().uuidString)", directoryHint: .isDirectory)
+        }
+        sessionDirectory = candidate
 
         jsonlURL = sessionDirectory.appending(path: "transcript.jsonl")
-        FileManager.default.createFile(atPath: jsonlURL.path, contents: nil)
+        guard FileManager.default.createFile(atPath: jsonlURL.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
         handle = try FileHandle(forWritingTo: jsonlURL)
         self.startedAt = startedAt
     }

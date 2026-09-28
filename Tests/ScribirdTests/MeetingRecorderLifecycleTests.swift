@@ -11,6 +11,7 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
     private var savedPreferences: [String: Any] = [:]
     private let preferenceKeys = [
         "transcriptionLanguage", "savesOriginalAudio", "opensSessionFolderOnStop",
+        "transcriptRootPath", "pinnedInputDeviceUID", "pinnedOutputDeviceUID",
     ]
 
     override func setUp() async throws {
@@ -421,4 +422,168 @@ private final class StubCapture: CaptureSource {
     }
     func reconnect() throws {}
     func reconnect(toDeviceUID uid: String?) throws {}
+}
+
+
+extension MeetingRecorderLifecycleTests {
+    func test_mcpLanguageSwitch_preservesPendingTextAndCapture() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        let start = await control.handle(ControlRequest(command: "start_recording", arguments: ["language": .string("auto")]))
+        XCTAssertNil(start.error)
+        let directory = try XCTUnwrap(recorder.currentSessionDirectory)
+        let remote = try XCTUnwrap(harness.provider.latest[.remote])
+        await emitAndObserve(segment("전환 직전 문장", speaker: .remote, final: false, locale: "ko-KR"),
+                             through: remote, recorder: recorder)
+        let switched = await control.handle(ControlRequest(command: "set_recording_language", arguments: ["language": .string("korean")]))
+        XCTAssertNil(switched.error)
+        XCTAssertEqual(switched.result?.object?["language"], .string("korean"))
+        XCTAssertEqual(switched.result?.object?["pendingCommand"], .null)
+        XCTAssertEqual(recorder.currentSessionDirectory, directory)
+        XCTAssertTrue(try jsonl(directory).contains("전환 직전 문장"))
+        XCTAssertEqual(harness.provider.prepareCount, 1)
+        XCTAssertTrue(harness.captures.values.allSatisfy { $0.count == 1 && $0[0].stopCount == 0 })
+        let english = await control.handle(ControlRequest(command: "set_recording_language", arguments: ["language": .string("english")]))
+        XCTAssertNil(english.error)
+        XCTAssertEqual(recorder.language, .english)
+        _ = await control.handle(ControlRequest(command: "stop_recording"))
+        XCTAssertTrue(try markdown(directory).contains("전환 직전 문장"))
+    }
+
+    func test_mcpRejectedChanges_preserveLanguageAndOutputSettings() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        _ = await control.handle(ControlRequest(command: "start_recording", arguments: ["language": .string("english")]))
+        let directory = recorder.currentSessionDirectory
+        harness.provider.rejectSwitch = true
+        let switchResult = await control.handle(ControlRequest(command: "set_recording_language", arguments: ["language": .string("auto")]))
+        XCTAssertNotNil(switchResult.error)
+        XCTAssertEqual(recorder.language, .english)
+        let preferences = await control.handle(ControlRequest(command: "set_recording_preferences", arguments: [
+            "saves_audio": .bool(true), "opens_folder_on_stop": .bool(true),
+        ]))
+        XCTAssertNotNil(preferences.error)
+        XCTAssertFalse(recorder.savesAudio)
+        XCTAssertFalse(recorder.opensFolderOnStop)
+        let location = await control.handle(ControlRequest(command: "set_transcript_root", arguments: ["path": .string(root.path)]))
+        XCTAssertNotNil(location.error)
+        let invalid = await control.handle(ControlRequest(command: "set_recording_language", arguments: ["language": .string("japanese")]))
+        XCTAssertNotNil(invalid.error)
+        XCTAssertEqual(recorder.currentSessionDirectory, directory)
+        XCTAssertEqual(recorder.state, .recording)
+        await recorder.stop()
+    }
+
+    func test_mcpOverlappingMutation_isRejectedWhileStatusRemainsReadable() async throws {
+        let harness = RecordingHarness(root: root)
+        let gate = AsyncTestGate()
+        let started = expectation(description: "capture started")
+        harness.beforeCapture = { speaker in
+            if speaker == .me { started.fulfill(); await gate.wait() }
+        }
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        let starting = Task { await control.handle(ControlRequest(command: "start_recording")) }
+        await fulfillment(of: [started], timeout: 2)
+        let rejected = await control.handle(ControlRequest(command: "set_recording_language", arguments: ["language": .string("auto")]))
+        XCTAssertNotNil(rejected.error)
+        let status = await control.handle(ControlRequest(command: "get_app_status"))
+        XCTAssertNil(status.error)
+        XCTAssertEqual(status.result?.object?["pendingCommand"], .string("start_recording"))
+        XCTAssertEqual(status.result?.object?["state"], .string("preparing"))
+        await gate.open()
+        let result = await starting.value
+        XCTAssertNil(result.error)
+        await recorder.stop()
+    }
+
+    func test_mcpPaginationAndInvalidNumbers_doNotLoseFinalityOrTrap() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        await recorder.start()
+        let remote = try XCTUnwrap(harness.provider.latest[.remote])
+        await emitAndObserve(segment("pending", speaker: .remote, final: false), through: remote, recorder: recorder)
+        let live = await control.handle(ControlRequest(command: "get_live_transcript"))
+        guard case .array(let segments) = live.result?.object?["segments"] else { return XCTFail("missing segments") }
+        XCTAssertEqual(segments.first?.object?["isFinal"], .bool(false))
+        let final = await control.handle(ControlRequest(command: "get_live_transcript", arguments: ["include_partial": .bool(false)]))
+        XCTAssertEqual(final.result?.object?["total"], .number(0))
+        for value in [ControlValue.number(Double(Int.max)), .number(-1), .number(1.5), .bool(true)] {
+            let invalid = await control.handle(ControlRequest(command: "get_live_transcript", arguments: ["offset": value]))
+            XCTAssertNotNil(invalid.error)
+        }
+        await recorder.stop()
+    }
+
+    func test_mcpStdioClient_controlsRealRecorderOverUnixSocket() async throws {
+        guard ProcessInfo.processInfo.environment["SCRIBIRD_MCP_INTEGRATION"] == "1" else {
+            throw XCTSkip("Set SCRIBIRD_MCP_INTEGRATION=1 after uv sync --project mcp --frozen")
+        }
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        let server = LocalControlServer(handle: { await control.handle($0) })
+        let directory = URL(filePath: "/tmp/sc-test-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+        defer { server.stop(); try? FileManager.default.removeItem(at: directory) }
+        try server.start(in: directory)
+        let socket = try XCTUnwrap(server.socketPath)
+        let project = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let script = project.appending(path: "mcp/tests/control_contract_client.py").path
+        let python = project.appending(path: "mcp/.venv/bin/python").path
+        let output = root.path
+        let result = try await Task.detached {
+            let process = Process()
+            process.executableURL = URL(filePath: python)
+            process.arguments = [script, socket, output]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+        }.value
+        XCTAssertEqual(result.0, 0, result.1)
+        XCTAssertEqual(recorder.state, .idle)
+        XCTAssertEqual(harness.provider.prepareCount, 1)
+        XCTAssertTrue(harness.captures.values.allSatisfy { $0.count == 1 && $0[0].stopCount == 1 })
+    }
+}
+
+
+extension MeetingRecorderLifecycleTests {
+    func test_mcpAllCommands_rejectUnknownArgumentsBeforeSideEffects() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        for command in AppControl.commands {
+            let response = await control.handle(ControlRequest(command: command, arguments: ["unexpected": .bool(true)]))
+            XCTAssertNotNil(response.error, command)
+            XCTAssertNil(response.result, command)
+            XCTAssertNil(control.pendingCommand, command)
+        }
+        XCTAssertEqual(harness.provider.prepareCount, 0)
+        XCTAssertEqual(recorder.state, .idle)
+        XCTAssertFalse(recorder.savesAudio)
+        XCTAssertFalse(recorder.opensFolderOnStop)
+    }
+
+    func test_mcpNullResetsRoot_butMissingAndWrongTypeDoNot() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        let control = AppControl(recorder: recorder)
+        let chosen = await control.handle(ControlRequest(command: "set_transcript_root", arguments: ["path": .string(root.path)]))
+        XCTAssertNil(chosen.error)
+        for arguments: [String: ControlValue] in [[:], ["path": .bool(false)], ["path": .string("")]] {
+            let response = await control.handle(ControlRequest(command: "set_transcript_root", arguments: arguments))
+            XCTAssertNotNil(response.error)
+            XCTAssertEqual(recorder.chosenTranscriptRoot?.path, root.path)
+        }
+        let reset = await control.handle(ControlRequest(command: "set_transcript_root", arguments: ["path": .null]))
+        XCTAssertNil(reset.error)
+        XCTAssertNil(recorder.chosenTranscriptRoot)
+    }
 }
