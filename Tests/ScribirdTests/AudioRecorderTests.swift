@@ -3,6 +3,27 @@ import XCTest
 @testable import Scribird
 
 final class AudioRecorderTests: XCTestCase {
+    /// A real invalid parent must remain diagnosable after a healthy rotation.
+    func test_storageFailure_survivesRotationAndHealthyNextFile() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let invalid = root.appending(path: "parent-file")
+        try Data().write(to: invalid)
+        let next = root.appending(path: "next")
+        try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
+        let recorder = AudioRecorder(directory: invalid)
+        let source = try XCTUnwrap(buffer(sampleRate: 48_000, channels: 1, amplitude: 0.25))
+        recorder.write(source, for: .remote)
+        XCTAssertTrue(recorder.finish().isEmpty)
+        let error = try XCTUnwrap(recorder.storageError).localizedDescription
+        _ = recorder.rotate(to: next)
+        XCTAssertEqual(recorder.storageError?.localizedDescription, error)
+        recorder.write(source, for: .remote)
+        let file = try AVAudioFile(forReading: XCTUnwrap(recorder.finish().first))
+        XCTAssertGreaterThan(file.length, 0)
+        XCTAssertEqual(recorder.storageError?.localizedDescription, error)
+    }
+
     func test_write_deviceFormats_savesSinglePlayableMonoAACAtFixedFormat() throws {
         let formats: [(Double, AVAudioChannelCount, Bool)] = [
             (16_000, 1, false),

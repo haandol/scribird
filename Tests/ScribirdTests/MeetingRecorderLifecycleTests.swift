@@ -61,6 +61,83 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
         XCTAssertEqual(harness.captures[.remote]?.first?.stopCount, 1)
     }
 
+    /// Audio-only disk failure must leave a successful transcript and an idle recorder.
+    func test_audioSaveFailure_doesNotFailSuccessfulTranscription() async throws {
+        RecordingPreferences.save(savesAudio: true)
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        await recorder.start()
+        let directory = try XCTUnwrap(recorder.currentSessionDirectory)
+        try blockAudioOutput(in: directory, harness: harness)
+        await harness.provider.latest[.remote]?.emit(segment("saved transcript", speaker: .remote))
+        await recorder.stop()
+        XCTAssertEqual(recorder.state, .idle)
+        XCTAssertTrue(try markdown(directory).contains("saved transcript"))
+        let warning = try XCTUnwrap(recorder.audioStorageWarning)
+        let status = try XCTUnwrap(AppControl(recorder: recorder).status().object)
+        XCTAssertEqual(status["warnings"], .array([.string(warning)]))
+        await recorder.start()
+        XCTAssertNil(recorder.audioStorageWarning)
+        await recorder.stop()
+    }
+
+    /// A storage error at either engine's boundary cannot stop capture or disappear at stop.
+    func test_audioSaveFailureAtBoundary_preservesCaptureAndNextTranscript() async throws {
+        for engine in FileTranscriptionEngine.allCases {
+            RecordingPreferences.save(savesAudio: true)
+            let harness = RecordingHarness(root: root)
+            let recorder = harness.makeRecorder()
+            recorder.chooseEngine(engine)
+            await recorder.start()
+            let previous = try XCTUnwrap(recorder.currentSessionDirectory)
+            try blockAudioOutput(in: previous, harness: harness)
+            harness.now += 10
+            await recorder.startNewSession()
+            XCTAssertEqual(recorder.state, .recording)
+            XCTAssertNotNil(harness.audioRecorder?.storageError)
+            XCTAssertNotNil(recorder.audioStorageWarning)
+            XCTAssertEqual(harness.captures[.remote]?.count, 1)
+            XCTAssertEqual(harness.captures[.remote]?.first?.stopCount, 0)
+            let provider = engine == .qwen3 ? harness.qwenProvider : harness.provider
+            await provider.latest[.remote]?.emit(segment("next transcript", speaker: .remote, start: 11))
+            await recorder.stop()
+            XCTAssertEqual(recorder.state, .idle)
+            XCTAssertNotNil(recorder.audioStorageWarning)
+            XCTAssertTrue(try markdown(XCTUnwrap(recorder.lastSessionDirectory)).contains("next transcript"))
+        }
+    }
+
+    /// A separate audio warning must not mask a real transcript write failure.
+    func test_audioAndTranscriptFailure_reportsBothWithoutLosingJSONL() async throws {
+        RecordingPreferences.save(savesAudio: true)
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        await recorder.start()
+        let directory = try XCTUnwrap(recorder.currentSessionDirectory)
+        try blockAudioOutput(in: directory, harness: harness)
+        try FileManager.default.createDirectory(at: directory.appending(path: "transcript.md"), withIntermediateDirectories: false)
+        await harness.provider.latest[.remote]?.emit(segment("retained JSONL", speaker: .remote))
+        await recorder.stop()
+        guard case .failed = recorder.state else { return XCTFail("Transcript failure must fail the session") }
+        XCTAssertNotNil(recorder.transcriptionWarning)
+        XCTAssertNotNil(recorder.audioStorageWarning)
+        XCTAssertTrue(try jsonl(directory).contains("retained JSONL"))
+    }
+
+    /// Uses an owned file as the audio parent, leaving transcript storage healthy.
+    private func blockAudioOutput(in directory: URL, harness: RecordingHarness) throws {
+        let invalid = directory.appending(path: "invalid-audio-parent")
+        try Data().write(to: invalid)
+        let audio = try XCTUnwrap(harness.audioRecorder)
+        _ = audio.rotate(to: invalid)
+        let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000,
+                                               channels: 1, interleaved: false))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 960))
+        buffer.frameLength = 960
+        for frame in 0..<960 { buffer.floatChannelData![0][frame] = 0.25 }
+        audio.write(buffer, for: .remote)
+    }
+
     func test_engineChangeWhileRecording_preservesActiveAndStoredEngine() async throws {
         let harness = RecordingHarness(root: root)
         let recorder = harness.makeRecorder()
@@ -417,6 +494,7 @@ private final class RecordingHarness {
     var now = Date(timeIntervalSince1970: 1_700_000_000)
     var rootResolutions = 0
     var beforeCapture: (@MainActor (Speaker) async -> Void)?
+    var audioRecorder: AudioRecorder?
 
     init(root: URL) { self.root = root }
 
@@ -427,7 +505,8 @@ private final class RecordingHarness {
         var environment = RecordingEnvironment()
         environment.speech = provider
         environment.qwen = qwenProvider
-        environment.makeCapture = { [self] speaker, _, _, _ in
+        environment.makeCapture = { [self] speaker, _, audio, _ in
+            audioRecorder = audio
             await beforeCapture?(speaker)
             let capture = StubCapture(failsToStart: failingSources.contains(speaker))
             captures[speaker, default: []].append(capture)
@@ -538,6 +617,8 @@ private actor StubTranscription: Transcribing {
 
     func segments() async -> AsyncStream<TranscriptSegment> { stream }
     func emit(_ segment: TranscriptSegment) { continuation.yield(segment) }
+    /// Supplies a successful boundary without loading a real recognizer.
+    func checkpoint() async -> Double? { 0 }
 
     func run(inputSequence: AsyncStream<AnalyzerInput>) async throws {
         for await _ in inputSequence {}

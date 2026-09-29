@@ -91,6 +91,7 @@ final class MeetingRecorder {
     private(set) var engine: FileTranscriptionEngine
     private(set) var engineWarning: String?
     private(set) var transcriptionWarning: String?
+    private(set) var audioStorageWarning: String?
     private(set) var isChangingSession = false
     private var qwenSessionOffsets: [Speaker: Double] = [:]
     private var captureBoundary = CaptureBoundaryCoordinator()
@@ -525,6 +526,7 @@ final class MeetingRecorder {
         qwenSessionOffsets = [:]
         captureBoundary = CaptureBoundaryCoordinator()
         transcriptionWarning = nil
+        audioStorageWarning = nil
         engineWarning = nil
 
         do {
@@ -697,6 +699,7 @@ final class MeetingRecorder {
 
     // MARK: - 중지
 
+    /// Finalizes both archives before teardown; audio-only errors stay separate from transcript failure.
     func stop() async {
         guard state == .recording, !isChangingSession else { return }
         state = .stopping
@@ -728,7 +731,7 @@ final class MeetingRecorder {
         if let warning = inputDeliveryWarning { transcriptionWarning = warning }
 
         let audioFiles = audioRecorder?.finish() ?? []
-        let storageError = audioRecorder?.storageError
+        updateAudioStorageWarning()
         lastSessionDirectory = store?.sessionDirectory
         do { _ = try await store?.finalize(audioFiles: audioFiles) }
         catch { transcriptionWarning = error.localizedDescription }
@@ -741,18 +744,18 @@ final class MeetingRecorder {
             using: folderOpener
         )
 
-        // Preserve both failures if transcript persistence and original-audio storage fail together.
-        if let storageError {
-            // 설정 창을 싣지 않는다 — 디스크 쓰기 실패는 권한 설정으로 고칠 수 없으므로
-            // 보내면 아무것도 할 수 없는 화면을 열게 된다.
-            let audioFailure = tr("회의 음성 저장에 실패했습니다: \(storageError.localizedDescription)",
-                                  "Meeting audio failed to save: \(storageError.localizedDescription)")
-            state = .failed(Failure([transcriptionWarning, audioFailure].compactMap { $0 }.joined(separator: "\n")))
-        } else if let transcriptionWarning {
+        if let transcriptionWarning {
             state = .failed(Failure(transcriptionWarning))
         } else {
             state = .idle
         }
+    }
+
+    /// Keeps audio loss visible after stop and rotation without treating a saved transcript as failed.
+    private func updateAudioStorageWarning() {
+        guard let error = audioRecorder?.storageError else { return }
+        audioStorageWarning = tr("회의 음성 저장에 실패했습니다: \(error.localizedDescription)",
+                                 "Meeting audio failed to save: \(error.localizedDescription)")
     }
 
     /// 아직 확정되지 않은 발화를 모두 주어진 스토어에 못박는다.
@@ -951,7 +954,7 @@ final class MeetingRecorder {
         }
     }
 
-    /// 녹취 중에 세션을 갈아 끼운다.
+    /// Rotates archives without reopening capture, retaining any previous audio-storage warning.
     private func rotateWhileRecording() async {
         // 경계 시점을 먼저 확정한다. 이후 도착하는 발화는 새 세션의 몫이다.
         let boundary = environment.now()
@@ -972,6 +975,7 @@ final class MeetingRecorder {
             let store = try TranscriptStore(startedAt: boundary, root: root, engine: engine)
             // 오디오도 같은 경계에서 갈아 끼운다. 컨테이너를 닫아야 파일이 열린다.
             let audioFiles = audioRecorder?.rotate(to: store.sessionDirectory) ?? []
+            updateAudioStorageWarning()
             lastSessionDirectory = previousStore?.sessionDirectory
             do { _ = try await previousStore?.finalize(audioFiles: audioFiles) }
             catch { transcriptionWarning = error.localizedDescription }
@@ -1001,7 +1005,7 @@ final class MeetingRecorder {
     }
 
     /// Closes original audio immediately, drains pre-boundary Qwen results into the old store,
-    /// then releases post-boundary results. Capture keeps running throughout inference.
+    /// then releases post-boundary results. Capture and audio failure reporting survive rotation.
     private func rotateQwenWhileRecording() async {
         guard let root = sessionRoot, let transcription else { return }
         do {
@@ -1015,6 +1019,7 @@ final class MeetingRecorder {
                 for marker in markers { marker() }
                 return audio?.rotate(to: directory) ?? []
             }
+            updateAudioStorageWarning()
             let offsets = await transcription.checkpoint(until: environment.finalizationTimeout)
             if offsets.count != transcription.sessions.count {
                 transcriptionWarning = tr(

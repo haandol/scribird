@@ -87,6 +87,10 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   a deinterleaved layout and silently misreads the interleaved process-tap buffers.
 - **Record originals before resampling.** `AudioRecorder.write` must receive the capture
   buffer, not the 16 kHz mono transcription buffer, or reprocessing value is lost.
+- **Audio storage failure is separate from transcription failure.** Keep the warning through
+  session rotation and after stop; starting a new recording resets that run’s warning. A healthy transcript still
+  ends successfully. Encode real filesystem failure in tests, and verify a subsequent audio
+  file remains playable while the earlier warning survives.
 - **Append finalized segments immediately.** Do not buffer the transcript in memory until
   session end. Writing per segment is what survives an app crash; the per-segment fsync on
   top of it covers OS panic and power loss.

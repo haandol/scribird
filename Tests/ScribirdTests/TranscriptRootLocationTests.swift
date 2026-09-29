@@ -12,6 +12,16 @@ import XCTest
 /// 접으면 그 회의를 통째로 잃고, 회의는 재생성 불가능하다. 회의록이 예상한 곳에 없는 것은 위치를
 /// 알려주면 회복되는 불편이지만, 녹취되지 않은 것은 되돌릴 수 없다.
 final class TranscriptRootLocationTests: XCTestCase {
+    /// English users must see the fallback reason and both destinations in English.
+    func test_fallback_englishNoticeExplainsReasonAndBothLocations() throws {
+        let warning = try XCTUnwrap(TranscriptRootLocation.warning(for: .chosenUnavailable(
+            chosen: URL(filePath: "/chosen/Meetings"), fallback: URL(filePath: "/default/Scribird")
+        ), language: .english))
+        XCTAssertTrue(warning.contains("Meetings"))
+        XCTAssertTrue(warning.contains("Scribird"))
+        XCTAssertTrue(warning.contains("unavailable"))
+        XCTAssertFalse(warning.contains("기록합니다"))
+    }
 
     private var sandbox: URL!
     private var originalHome: String?

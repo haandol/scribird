@@ -89,20 +89,17 @@ enum TranscriptRootLocation {
         return manager.isWritableFile(atPath: directory.path)
     }
 
-    /// 사용자에게 알릴 문구. 의도와 다른 곳에 쓰고 있을 때만 값이 있다.
-    ///
-    /// 되돌린 것을 알리지 않으면 사용자는 자기가 고른 폴더를 계속 보며 회의록이 사라졌다고
-    /// 판단한다. 어디에 기록되는지와 왜 그렇게 됐는지를 함께 적는다.
-    static func warning(for resolution: Resolution) -> String? {
+    /// Explains an unavailable chosen folder and the actual destination in the interface language.
+    static func warning(for resolution: Resolution, language: AppLanguage = .current) -> String? {
         switch resolution {
         case .standard, .chosen:
             return nil
         case .chosenUnavailable(let chosen, let fallback):
-            return """
-                고른 저장 폴더 «\(chosen.lastPathComponent)»를 쓸 수 없어 기본 위치 \
-                «\(fallback.lastPathComponent)»에 기록합니다. 연결을 확인하면 다음 회의부터 \
-                고른 폴더로 돌아갑니다.
-                """
+            return tr(
+                "고른 저장 폴더 «\(chosen.lastPathComponent)»를 쓸 수 없어 기본 위치 «\(fallback.lastPathComponent)»에 기록합니다. 연결을 확인하면 다음 회의부터 고른 폴더로 돌아갑니다.",
+                "The chosen save folder “\(chosen.lastPathComponent)” is unavailable. Recording to the default location “\(fallback.lastPathComponent)”. Reconnect the folder to use it for the next meeting.",
+                language: language
+            )
         }
     }
 }

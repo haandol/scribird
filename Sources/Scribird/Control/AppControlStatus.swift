@@ -11,6 +11,7 @@ extension AppControl {
         }
     }
 
+    /// Reports archive warnings separately so successful transcription remains distinguishable from audio loss.
     func status() -> ControlValue {
         let failure: String? = if case .failed(let failure) = recorder.state { failure.message } else { nil }
         return .object([
@@ -30,6 +31,7 @@ extension AppControl {
                 recorder.sourceWarning, recorder.modelRetentionWarning, recorder.languageSwitchWarning,
                 recorder.rootFallbackWarning, connectionError,
                 recorder.transcriptionWarning,
+                recorder.audioStorageWarning,
                 recorder.inputDeliveryWarning,
             ].compactMap { $0 }),
             "sources": .array(Speaker.allCases.map { speaker in

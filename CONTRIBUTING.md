@@ -308,6 +308,11 @@ pinned choice — the selection is kept, not erased.
 the transcript window stays visible. Then set a combination already taken by another app and
 confirm the settings footer reports the failure instead of failing silently.
 
+**Storage failure isolation.** The audio regression harness includes an invalid owned output
+parent, rotation into a healthy directory, both live engines' boundaries, and simultaneous audio
+and transcript failure. It verifies playable later audio, retained transcript text and warnings,
+and successful stop for an audio-only failure. Do not test this by filling a real disk.
+
 **Window layering and close.** With the transcript window up, stop a recording and confirm the
 session folder appears **in front of** it — the window floats above other apps, so a regression
 here shows up as the folder opening behind it, which the automated tests can't see. Click the

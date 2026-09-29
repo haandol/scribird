@@ -126,22 +126,22 @@
       "adrs": [
         {
           "path": "docs/adr/archive/0001-transcript-durability.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-09-29)",
           "summary": "확정 발화를 즉시 append하고 읽기용 회의록은 종료 시 생성하며 마무리를 시간 제한한다"
         },
         {
           "path": "docs/adr/archive/0002-original-audio-format.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-09-29)",
           "summary": "회의 중 두 캡처를 공통 시간축의 모노 meeting.m4a 하나로 합성하고 별도 소스 파일은 만들지 않는다"
         },
         {
           "path": "docs/adr/archive/0003-session-output-discoverability.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-09-29)",
           "summary": "저장 위치를 항상 표시하고(녹취 중·직전·루트) 종료 시 폴더를 자동으로 연다 (기본 켬, 세션 경계에서는 열지 않음)"
         },
         {
           "path": "docs/adr/archive/0004-transcript-root-location.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-09-29)",
           "summary": "산출물 저장 루트를 사용자가 고를 수 있게 하고, 쓸 수 없으면 기본 위치로 되돌려 녹취를 진행한다 (기존 산출물은 옮기지 않음)"
         }
       ],

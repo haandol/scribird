@@ -267,10 +267,11 @@ final class AudioRecorder: @unchecked Sendable {
         return try AVAudioFile(forWriting: url, settings: settings)
     }
 
+    /// Stops this audio file without blocking transcription, retaining the first failure across rotation.
     private func fail(_ error: any Error) {
         failed = true
         pendingBlocks.removeAll()
-        errorLock.withLock { lastError = error }
+        errorLock.withLock { if lastError == nil { lastError = error } }
     }
 
     /// 현재 세션 파일을 닫은 뒤 같은 캡처 스트림을 새 세션 파일로 이어 쓴다.
@@ -289,6 +290,7 @@ final class AudioRecorder: @unchecked Sendable {
         queue.sync { finishSync() }
     }
 
+    /// Drains and validates the current container, preserving an earlier error if validation also fails.
     private func finishSync() -> [URL] {
         if !failed, latestEndFrame > 0 {
             let finalBlock = (latestEndFrame + Self.blockFrames - 1) / Self.blockFrames
@@ -304,13 +306,14 @@ final class AudioRecorder: @unchecked Sendable {
 
         guard (try? AVAudioFile(forReading: url)) != nil else {
             errorLock.withLock {
-                lastError = RecorderError.fileNotFinalized(url.lastPathComponent)
+                if lastError == nil { lastError = RecorderError.fileNotFinalized(url.lastPathComponent) }
             }
             return []
         }
         return [url]
     }
 
+    /// Allows the next file to record while keeping earlier storage failures available to the caller.
     private func resetForNextSession() {
         sink = nil
         sourceConverters.removeAll()
@@ -319,7 +322,6 @@ final class AudioRecorder: @unchecked Sendable {
         nextWriteBlock = 0
         latestEndFrame = 0
         failed = false
-        errorLock.withLock { lastError = nil }
     }
 
     var storageError: (any Error)? {

@@ -367,3 +367,10 @@ with:
 
 **Do not attach meeting audio or transcripts.** Describe the symptom instead — nobody needs
 your meeting to diagnose a permission problem.
+
+### Meeting audio could not be saved
+
+An audio-storage warning means the audio file may be missing or incomplete. Successfully
+saved transcript text is retained. The warning stays visible through session boundaries and
+after stopping; a new recording clears it. Check the save folder and disk space before the
+next meeting. A transcript write failure is reported separately as a recording error.

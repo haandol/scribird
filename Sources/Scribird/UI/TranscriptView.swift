@@ -509,8 +509,12 @@ struct TranscriptView: View {
         )
     }
 
+    /// Keeps output location and audio-storage loss visible even after recording stops.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let warning = recorder.audioStorageWarning {
+                Text(warning).captionStyle(.orange)
+            }
             // 단축키 등록 실패는 조용히 넘기지 않는다. 알리지 않으면 사용자는
             // 단축키를 눌러 보고 앱이 고장 났다고 판단한다. 설정 창을 열지 않아도
             // 보여야 하므로 이 경고만 전사 화면에 남긴다.
