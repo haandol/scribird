@@ -37,24 +37,24 @@ struct AppVersion: Comparable, CustomStringConvertible, Sendable {
         components.map(String.init).joined(separator: ".")
     }
 
+    /// Orders versions numerically, using the same zero-padding rule as equality.
     static func < (lhs: AppVersion, rhs: AppVersion) -> Bool {
-        // 자리 수가 다를 수 있다 — 없는 자리는 0으로 본다 (1.2 == 1.2.0).
-        let count = max(lhs.components.count, rhs.components.count)
-        for index in 0..<count {
-            let left = index < lhs.components.count ? lhs.components[index] : 0
-            let right = index < rhs.components.count ? rhs.components[index] : 0
-            if left != right { return left < right }
-        }
-        return false
+        compare(lhs, rhs) == .orderedAscending
     }
 
+    /// Treats omitted trailing zeroes as equal, so 1.2 and 1.2.0 agree with ordering.
     static func == (lhs: AppVersion, rhs: AppVersion) -> Bool {
+        compare(lhs, rhs) == .orderedSame
+    }
+
+    /// Compares the first unequal numeric position, padding missing positions with zero.
+    private static func compare(_ lhs: AppVersion, _ rhs: AppVersion) -> ComparisonResult {
         let count = max(lhs.components.count, rhs.components.count)
         for index in 0..<count {
             let left = index < lhs.components.count ? lhs.components[index] : 0
             let right = index < rhs.components.count ? rhs.components[index] : 0
-            if left != right { return false }
+            if left != right { return left < right ? .orderedAscending : .orderedDescending }
         }
-        return true
+        return .orderedSame
     }
 }
