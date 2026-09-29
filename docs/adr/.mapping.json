@@ -39,12 +39,12 @@
       "adrs": [
         {
           "path": "docs/adr/transcription/0001-source-based-speaker-attribution.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-09-29)",
           "summary": "소스별 독립 분석기로 화자를 확정하고 나 vs 상대방 전원 2분리를 상한으로 수용한다"
         },
         {
           "path": "docs/adr/transcription/0002-token-level-language-arbitration.md",
-          "status": "Proposed",
+          "status": "Accepted (2026-09-29)",
           "summary": "다국어 결과를 토큰 단위 구역별 지속시간 가중 신뢰도로 중재한다"
         },
         {

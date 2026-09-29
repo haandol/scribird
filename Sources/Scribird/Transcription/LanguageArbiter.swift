@@ -49,6 +49,7 @@ final class LanguageArbiter {
         var segments: [TranscriptSegment]
         var range: CMTimeRange
         var timer: Task<Void, Never>?
+        let createdAt: ContinuousClock.Instant
     }
 
     private var rounds: [UUID: Round] = [:]
@@ -63,27 +64,29 @@ final class LanguageArbiter {
         self.onDecision = onDecision
     }
 
-    /// 전사기 결과 하나를 투입한다.
-    ///
-    /// - Returns: 즉시 표시할 세그먼트. 잠정 결과는 중재 없이 통과시켜
-    ///   실시간 반응성을 지킨다. 확정 결과는 유예 후 `onDecision`으로 나온다.
+    /// Keeps provisional text responsive and groups all overlapping finals for one decision.
+    /// Bridging rounds retain the earliest deadline so arrivals cannot postpone saving forever.
+    /// - Returns: Display-only provisional text; finals are delivered through `onDecision`.
     func submit(_ segment: TranscriptSegment) -> TranscriptSegment? {
         guard segment.isFinal else {
-            // 잠정 결과는 화면에만 쓰이고 저장되지 않는다. 다만 신뢰도가 확연히
-            // 낮으면 오답일 가능성이 높아 표시하지 않는다.
-            if let confidence = segment.confidence, confidence < 0.45 {
-                return nil
-            }
             return segment
         }
 
-        // 시간이 겹치는 라운드가 있으면 같은 발화로 보고 합친다.
-        let overlapping = rounds.first { _, round in
+        // A late segment can bridge multiple previously disjoint rounds.
+        let overlapping = rounds.filter { _, round in
             !round.range.intersection(segment.range).isEmpty
-        }
-        if let key = overlapping?.key {
-            rounds[key]!.segments.append(segment)
-            rounds[key]!.range = rounds[key]!.range.union(segment.range)
+        }.sorted { $0.value.createdAt < $1.value.createdAt }
+        if let first = overlapping.first {
+            var merged = first.value
+            merged.segments.append(segment)
+            merged.range = merged.range.union(segment.range)
+            for (key, round) in overlapping.dropFirst() {
+                round.timer?.cancel()
+                rounds.removeValue(forKey: key)
+                merged.segments.append(contentsOf: round.segments)
+                merged.range = merged.range.union(round.range)
+            }
+            rounds[first.key] = merged
             return nil
         }
 
@@ -93,7 +96,7 @@ final class LanguageArbiter {
             guard !Task.isCancelled else { return }
             await self?.resolve(key)
         }
-        rounds[key] = Round(segments: [segment], range: segment.range, timer: timer)
+        rounds[key] = Round(segments: [segment], range: segment.range, timer: timer, createdAt: .now)
         return nil
     }
 
