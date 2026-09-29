@@ -62,6 +62,8 @@ struct TranscriptView: View {
                 statusDetail
                     .captionStyle(.secondary)
                     .monospacedDigit()
+                Text(recorder.engine.displayName)
+                    .captionStyle(.secondary)
             }
 
             Spacer()
@@ -84,7 +86,7 @@ struct TranscriptView: View {
                        "Saves this transcript and continues into a new one")
                   : tr("화면을 비우고 새 회의록을 준비합니다",
                        "Clears the view and prepares a new transcript"))
-            .disabled(isTransitioning || !canStartNewSession)
+            .disabled(isTransitioning || recorder.isChangingLanguage || !canStartNewSession)
 
             Button {
                 Task { await recorder.toggle() }
@@ -150,7 +152,8 @@ struct TranscriptView: View {
     }
 
     private var isTransitioning: Bool {
-        switch recorder.state {
+        if recorder.isChangingSession { return true }
+        return switch recorder.state {
         case .preparingModel, .stopping: true
         default: false
         }
@@ -216,6 +219,12 @@ struct TranscriptView: View {
                         tint: .orange,
                         pane: .privacyRoot
                     )
+                }
+                if let warning = recorder.transcriptionWarning {
+                    Text(warning).captionStyle(.orange)
+                }
+                if let warning = recorder.inputDeliveryWarning {
+                    Text(warning).captionStyle(.orange)
                 }
 
                 if let warning = recorder.modelRetentionWarning {
@@ -547,7 +556,9 @@ struct TranscriptView: View {
 
                 Spacer()
 
-                Text(tr("\(recorder.segments.count)개 발화", "\(recorder.segments.count) utterances"))
+                Text(recorder.engine == .qwen3
+                     ? tr("\(recorder.segments.count)개 구간", "\(recorder.segments.count) chunks")
+                     : tr("\(recorder.segments.count)개 발화", "\(recorder.segments.count) utterances"))
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
 

@@ -15,6 +15,17 @@ import Foundation
 /// 없고, 단축키가 이미 같은 저장소를 쓴다. 회의 산출물이 아니라 환경 설정이므로 세션
 /// 디렉터리에 남기지 않는다.
 enum RecordingPreferences {
+    private static let engineKey = "liveTranscriptionEngine"
+
+    /// Engine settings are independent of file imports and fall back safely when absent or invalid.
+    static func engine(from defaults: UserDefaults = .standard) -> FileTranscriptionEngine {
+        defaults.string(forKey: engineKey).flatMap(FileTranscriptionEngine.init(rawValue:)) ?? .speechAnalyzer
+    }
+
+    /// Persists the next live recording's engine without changing any active file task.
+    static func save(engine: FileTranscriptionEngine, to defaults: UserDefaults = .standard) {
+        defaults.set(engine.rawValue, forKey: engineKey)
+    }
     private static let languageKey = "transcriptionLanguage"
     private static let savesAudioKey = "savesOriginalAudio"
     private static let opensFolderKey = "opensSessionFolderOnStop"

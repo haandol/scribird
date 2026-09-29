@@ -41,6 +41,14 @@ final class FileTranscriptionViewTests: XCTestCase {
             try render(FileTranscriptionView(model: model, languageSettings: settings),
                        size: CGSize(width: 540, height: 510),
                        to: directory.appending(path: "qwen-\(language.rawValue).png"))
+            try render(SettingsView(
+                recorder: MeetingRecorder(engine: .qwen3),
+                hotKeySettings: HotKeySettings(shortcut: .default),
+                settingsHotKeySettings: SettingsHotKeySettings(shortcut: HotKeyShortcut.Slot.settingsWindow.defaultShortcut),
+                microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings(shortcut: HotKeyShortcut.Slot.microphoneMute.defaultShortcut),
+                updateChecker: UpdateChecker(), languageSettings: settings, initialPane: .recording
+            ), size: CGSize(width: 460, height: 380),
+               to: directory.appending(path: "qwen-settings-\(language.rawValue).png"))
             try render(TranscriptView(
                 recorder: MeetingRecorder(), hotKeySettings: HotKeySettings(shortcut: .default),
                 languageSettings: settings, openSettings: {}

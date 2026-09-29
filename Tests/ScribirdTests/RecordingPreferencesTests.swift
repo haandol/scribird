@@ -29,6 +29,17 @@ final class RecordingPreferencesTests: XCTestCase {
 
     // MARK: - 기본값
 
+    func test_liveEngine_defaultAndInvalidValuesUseSpeechAnalyzer() {
+        XCTAssertEqual(RecordingPreferences.engine(from: defaults), .speechAnalyzer)
+        defaults.set("missing-engine", forKey: "liveTranscriptionEngine")
+        XCTAssertEqual(RecordingPreferences.engine(from: defaults), .speechAnalyzer)
+    }
+
+    func test_liveEngineSelection_survivesReload() {
+        RecordingPreferences.save(engine: .qwen3, to: defaults)
+        XCTAssertEqual(RecordingPreferences.engine(from: defaults), .qwen3)
+    }
+
     /// English는 앱이 시작 시 확보하는 필수 모델이므로 첫 선택도 그 모델만 요구해야 한다.
     func test_language_withNothingStored_isEnglish() {
         XCTAssertEqual(RecordingPreferences.language(from: defaults), .english,

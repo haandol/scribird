@@ -64,10 +64,12 @@ final class MeetingRecorder {
 
     init(
         modelManager: SpeechModelManager = SpeechModelManager(),
-        environment: RecordingEnvironment = RecordingEnvironment()
+        environment: RecordingEnvironment = RecordingEnvironment(),
+        engine: FileTranscriptionEngine? = nil
     ) {
         self.modelManager = modelManager
         self.environment = environment
+        self.engine = engine ?? RecordingPreferences.engine()
     }
 
     /// 직전 세션이 저장된 디렉터리. 메뉴에서 "폴더 열기"에 쓴다.
@@ -86,16 +88,53 @@ final class MeetingRecorder {
     /// 동작하므로, 화면이 고른 값을 표시하면 어느 언어로 인식되는지가 실제와 어긋나 결과를
     /// 해석할 수 없게 된다.
     private(set) var language: TranscriptionLanguage = RecordingPreferences.language()
+    private(set) var engine: FileTranscriptionEngine
+    private(set) var engineWarning: String?
+    private(set) var transcriptionWarning: String?
+    private(set) var isChangingSession = false
+    private var qwenSessionOffsets: [Speaker: Double] = [:]
+    private var captureBoundary = CaptureBoundaryCoordinator()
+    private var languageOperationID: UUID?
+    var isChangingLanguage: Bool { languageOperationID != nil }
+
+    /// A live engine belongs to the complete recording lifecycle; reject changes until it is idle.
+    func chooseEngine(_ next: FileTranscriptionEngine) {
+        guard !state.isBusy else {
+            engineWarning = tr("녹취를 마친 뒤 전사 엔진을 변경할 수 있습니다.",
+                               "Finish recording before changing the transcription engine.")
+            return
+        }
+        engine = next
+        RecordingPreferences.save(engine: next)
+        engineWarning = nil
+        if next == .speechAnalyzer { reconcileLanguageSelection() }
+    }
 
     /// 언어를 바꾸지 못한 이유. 다음 전환 시도나 세션 시작에서 지운다.
     private(set) var languageSwitchWarning: String?
 
     var availableLanguages: [TranscriptionLanguage] {
-        modelManager.availableLanguages
+        engine == .qwen3 ? TranscriptionLanguage.allCases : modelManager.availableLanguages
     }
 
     var canStartRecording: Bool {
-        modelManager.hasInstalledLanguage
+        engine == .qwen3 || modelManager.hasInstalledLanguage
+    }
+
+    /// The original recorder runs before the bounded analyzer queue, so expose any overflow separately.
+    var inputDeliveryWarning: String? {
+        let losses = Speaker.allCases.compactMap { speaker -> String? in
+            guard let capture = captures[speaker] else { return nil }
+            var messages: [String] = []
+            if let warning = capture.formatWarning { messages.append("\(speaker.captureLabel): \(warning)") }
+            if capture.droppedInputDuration > 0 {
+                let seconds = String(format: "%.2f", capture.droppedInputDuration)
+                messages.append(tr("\(speaker.captureLabel) 전사 입력 \(seconds)초가 처리 지연으로 누락되었습니다.",
+                                   "\(seconds) seconds of \(speaker.captureLabel) transcription input were lost due to processing delay."))
+            }
+            return messages.isEmpty ? nil : messages.joined(separator: " ")
+        }
+        return losses.isEmpty ? nil : losses.joined(separator: " ")
     }
 
     func refreshModelAvailability() async {
@@ -123,6 +162,7 @@ final class MeetingRecorder {
     /// 이 선택기는 실제로 사용할 수 있는 구성만 보여준다.
     func chooseLanguage(_ next: TranscriptionLanguage) async {
         languageSwitchWarning = nil
+        guard !isChangingSession, !isChangingLanguage, !isPreparingModel, state != .stopping else { return }
         guard availableLanguages.contains(next) else {
             languageSwitchWarning = tr(
                 "\(next.displayName) 모델이 설치되어 있지 않습니다. 설정에서 먼저 설치해 주세요.",
@@ -151,13 +191,20 @@ final class MeetingRecorder {
     /// 먼저여야 한다. 시도하고 되돌리는 방식은 쓸 수 없다.
     private func switchLanguageWhileRecording(to next: TranscriptionLanguage) async {
         let previous = language
+        guard let run = transcription else { return }
+        let operation = UUID()
+        languageOperationID = operation
+        defer { if languageOperationID == operation { languageOperationID = nil } }
         do {
-            let locales = try await environment.speech.installedLocales(for: next)
-
-            try await applyLocales(locales, for: next)
+            let provider = engine == .qwen3 ? environment.qwen : environment.speech
+            let locales = try await provider.installedLocales(for: next)
+            guard state == .recording, transcription === run else { return }
+            try await applyLocales(locales, for: next, run: run)
+            guard state == .recording, transcription === run else { return }
             language = next
             RecordingPreferences.save(language: next)
         } catch {
+            guard state == .recording, transcription === run else { return }
             // 전환 실패는 세션을 접지 않는다. 이전 언어가 그대로 동작하고 있으므로 녹취는
             // 계속되고, 사용자에게는 화면에 보이는 언어가 실제 동작 중인 것으로 남는다.
             language = previous
@@ -175,8 +222,11 @@ final class MeetingRecorder {
     /// 규칙이다.
     private func applyLocales(
         _ locales: [Locale],
-        for next: TranscriptionLanguage
+        for next: TranscriptionLanguage,
+        run: TranscriptionRun
     ) async throws {
+        let previous = language.locales
+        guard state == .recording, transcription === run else { throw CancellationError() }
         // 로케일이 빠지는 전환이면 **떼어내기 전에** 화면에 있는 미확정 발화를 남긴다.
         //
         // 전사기는 무음을 만나도 확정을 미룬다 — 실측: 발화 사이에 1.5초 무음을 넣어도 한국어
@@ -189,16 +239,35 @@ final class MeetingRecorder {
         // "안녕하세요. 오늘 회의를 시작하겠습니다."가 온전히 담겨 있었다). 그래서 확정을
         // 기다리는 대신 화면에 보이던 것을 그대로 남긴다 — 불완전한 발화가 누락보다 낫다는
         // 종료·경계와 같은 판단이다.
-        if !next.localeDifference(from: language).removed.isEmpty {
-            await drainPendingUtterances(into: store)
+        if engine == .speechAnalyzer, !next.localeDifference(from: language).removed.isEmpty {
+            try await drainPendingUtterances(into: store)
         }
 
-        for speaker in Speaker.allCases where activeSources.contains(speaker) {
-            guard let session = transcription?.sessions[speaker] else { continue }
-            try await session.setLocales(locales)
+        guard state == .recording, transcription === run else { throw CancellationError() }
+        var applied: [any Transcribing] = []
+        do {
+            for speaker in Speaker.allCases where activeSources.contains(speaker) {
+                guard state == .recording, transcription === run else { throw CancellationError() }
+                guard let session = run.sessions[speaker] else { continue }
+                try await session.setLocales(locales)
+                applied.append(session)
+            }
+        } catch {
+            for session in applied {
+                do { try await session.setLocales(previous) }
+                catch {
+                    await session.cancel()
+                    if state == .recording, transcription === run {
+                        transcriptionWarning = tr("언어 변경을 되돌리지 못한 입력의 전사를 중단했습니다.",
+                                                   "Stopped transcription for a source whose language could not be restored.")
+                    }
+                }
+            }
+            throw error
         }
 
-        if next.needsArbitration {
+        guard state == .recording, transcription === run else { throw CancellationError() }
+        if engine == .speechAnalyzer && next.needsArbitration {
             for speaker in Speaker.allCases where activeSources.contains(speaker) {
                 guard arbiters[speaker] == nil else { continue }
                 arbiters[speaker] = makeArbiter()
@@ -315,11 +384,14 @@ final class MeetingRecorder {
     /// 원인을 그대로 싣는다. 예전에는 예약 목록에 없다는 사실만으로 한도 초과라고 단정해,
     /// 예약이 0개인 기기에서 "5개를 초과했습니다"라는 오진이 나왔다.
     nonisolated static func retentionWarning(
-        for unreserved: [(locale: Locale, reason: String?)]
+        for unreserved: [(locale: Locale, reason: String?)],
+        requested: [Locale] = [], reserved: [Locale] = []
     ) -> String {
         let detail = unreserved
             .map { "\($0.locale.identifier)(\($0.reason ?? tr("원인 미제공", "no reason given")))" }
             .joined(separator: ", ")
+        let context = tr("요청: \(requested.map(\.identifier).joined(separator: ", ")); 현재 예약: \(reserved.map(\.identifier).joined(separator: ", ")).",
+                         "Requested: \(requested.map(\.identifier).joined(separator: ", ")); currently reserved: \(reserved.map(\.identifier).joined(separator: ", ")).")
         return tr(
             """
             언어 모델을 붙잡아 두지 못한 채 녹취합니다: \(detail). \
@@ -331,7 +403,7 @@ final class MeetingRecorder {
             Transcription works with the installed model, but if the system reclaims it \
             mid-meeting, transcription stops.
             """
-        )
+        ) + " " + context
     }
 
     /// 소스가 무음만 흘려보내는 상태인지.
@@ -450,15 +522,25 @@ final class MeetingRecorder {
         rootFallbackWarning = nil
         languageSwitchWarning = nil
         sessionTimeOffset = 0
+        qwenSessionOffsets = [:]
+        captureBoundary = CaptureBoundaryCoordinator()
+        transcriptionWarning = nil
+        engineWarning = nil
 
         do {
-            await modelManager.refresh()
-            reconcileLanguageSelection()
-            guard modelManager.hasInstalledLanguage else {
-                throw RecorderError.noInstalledLanguageModels
+            if engine == .speechAnalyzer {
+                let requested = language
+                await modelManager.refresh()
+                guard modelManager.hasInstalledLanguage else {
+                    throw RecorderError.noInstalledLanguageModels
+                }
+                guard modelManager.availableLanguages.contains(requested) else {
+                    throw RecorderError.languageModelNotInstalled(requested)
+                }
             }
 
-            let provisioned = try await environment.speech.prepare(language: language)
+            let provider = engine == .qwen3 ? environment.qwen : environment.speech
+            let provisioned = try await provider.prepare(language: language)
             let transcription = TranscriptionRun(sessions: provisioned.sessions)
             self.transcription = transcription
             modelRetentionWarning = provisioned.retentionWarning
@@ -472,7 +554,7 @@ final class MeetingRecorder {
             sessionRoot = rootLocation.directory
 
             let startedAt = environment.now()
-            let store = try TranscriptStore(startedAt: startedAt, root: rootLocation.directory)
+            let store = try TranscriptStore(startedAt: startedAt, root: rootLocation.directory, engine: engine)
             let audioRecorder = savesAudio
                 ? AudioRecorder(directory: store.sessionDirectory)
                 : nil
@@ -483,7 +565,7 @@ final class MeetingRecorder {
 
             // 언어가 둘 이상이면 양쪽 전사기가 모두 결과를 낸다. 어느 쪽이 맞는지
             // 신뢰도로 판정할 중재기를 화자별로 둔다.
-            if language.needsArbitration {
+            if engine == .speechAnalyzer && language.needsArbitration {
                 for speaker in Speaker.allCases {
                     arbiters[speaker] = makeArbiter()
                 }
@@ -563,16 +645,24 @@ final class MeetingRecorder {
                 let capture = try await environment.makeCapture(
                     speaker, audioFormat, audioRecorder, deviceSelections[speaker]?.deviceUID
                 )
+                capture.useBoundaryCoordinator(captureBoundary)
                 do {
                     try capture.start()
                     // 캡처가 실제로 떴을 때만 전사 세션을 물린다. 실패한 소스에
                     // 세션을 붙이면 끝나지 않는 스트림을 기다리는 태스크가 남아
                     // stop()이 영구 대기에 빠진다.
-                    await transcription.attach(speaker: speaker, to: capture.makeInputStream()) {
+                    await transcription.attach(speaker: speaker, to: capture.makeInputStream(), onFailure: {
+                        [weak self, weak transcription] message in
+                        guard let self, let transcription, self.transcription === transcription else { return }
+                        self.transcriptionWarning = tr(
+                            "\(speaker.captureLabel) 전사 실패: \(message)",
+                            "\(speaker.captureLabel) transcription failed: \(message)"
+                        )
+                    }) {
                         [weak self, weak transcription] segment in
                         guard let self, let transcription,
                               self.transcription === transcription else { return }
-                        await self.handle(segment)
+                        try await self.handle(segment)
                     }
                     captures[speaker] = capture
                     activeSources.insert(speaker)
@@ -608,8 +698,9 @@ final class MeetingRecorder {
     // MARK: - 중지
 
     func stop() async {
-        guard state == .recording else { return }
+        guard state == .recording, !isChangingSession else { return }
         state = .stopping
+        languageOperationID = nil
 
         // 감시를 캡처보다 먼저 끊는다. 남겨 두면 마무리 중에 도착한 알림이 이미 멈춘
         // 캡처를 다시 열 수 있다.
@@ -622,15 +713,25 @@ final class MeetingRecorder {
         // 마무리를 무한정 기다리지 않는다. 전사기 하나가 응답하지 않아도
         // 회의록과 오디오 파일은 반드시 저장돼야 한다.
         await transcription?.finish(until: environment.finalizationTimeout)
+        if transcription?.incompleteFinishing == true {
+            transcriptionWarning = tr(
+                "종료 제한 시간 안에 전사를 모두 처리하지 못했습니다. 저장에 성공한 결과는 남아 있습니다.",
+                "Transcription did not finish before the shutdown deadline. Successfully saved results were retained."
+            )
+        }
         // 시간 초과 후 취소 API의 반환을 다시 기다리면 같은 무한 대기에 빠진다.
         transcription?.cancel()
 
-        await drainPendingUtterances(into: store)
+        do { try await drainPendingUtterances(into: store) }
+        catch { transcriptionWarning = error.localizedDescription }
         segments = timeline.displaySegments
+        if let warning = inputDeliveryWarning { transcriptionWarning = warning }
 
         let audioFiles = audioRecorder?.finish() ?? []
         let storageError = audioRecorder?.storageError
-        lastSessionDirectory = await store?.finalize(audioFiles: audioFiles)
+        lastSessionDirectory = store?.sessionDirectory
+        do { _ = try await store?.finalize(audioFiles: audioFiles) }
+        catch { transcriptionWarning = error.localizedDescription }
         teardown()
 
         // 산출물이 확정된 뒤에 연다. 먼저 열면 회의록이 아직 없는 폴더를 보여준다.
@@ -640,17 +741,15 @@ final class MeetingRecorder {
             using: folderOpener
         )
 
-        // 전사는 성공했지만 회의 음성 저장이 실패한 경우. 회의록은 이미 남았으니
-        // 실패로 뭉개지 말고 저장 실패만 알린다.
+        // Preserve both failures if transcript persistence and original-audio storage fail together.
         if let storageError {
             // 설정 창을 싣지 않는다 — 디스크 쓰기 실패는 권한 설정으로 고칠 수 없으므로
             // 보내면 아무것도 할 수 없는 화면을 열게 된다.
-            state = .failed(
-                Failure(tr(
-                    "회의록은 저장했지만 회의 음성 저장에 실패했습니다: \(storageError.localizedDescription)",
-                    "The transcript was saved but the meeting audio failed to save: \(storageError.localizedDescription)"
-                ))
-            )
+            let audioFailure = tr("회의 음성 저장에 실패했습니다: \(storageError.localizedDescription)",
+                                  "Meeting audio failed to save: \(storageError.localizedDescription)")
+            state = .failed(Failure([transcriptionWarning, audioFailure].compactMap { $0 }.joined(separator: "\n")))
+        } else if let transcriptionWarning {
+            state = .failed(Failure(transcriptionWarning))
         } else {
             state = .idle
         }
@@ -667,12 +766,13 @@ final class MeetingRecorder {
     ///
     /// 두 경로가 이 순서를 각자 적고 있으면 한쪽만 고쳐질 수 있고, 그 증상(화면에는 있는데
     /// 파일에는 없음)은 사용자가 회의 후에야 발견한다.
-    private func drainPendingUtterances(into store: TranscriptStore?) async {
+    private func drainPendingUtterances(into store: TranscriptStore?) async throws {
         for arbiter in arbiters.values {
             await arbiter.flush()
         }
-        for segment in timeline.flushPending() {
-            await store?.append(segment)
+        for pending in timeline.pending.values.sorted(by: { $0.start < $1.start }) {
+            let segment = pending.replacingText(pending.text, isFinal: true, confidence: pending.confidence)
+            try await Self.commit(segment, to: timeline, store: store)
         }
     }
 
@@ -833,9 +933,13 @@ final class MeetingRecorder {
     /// 통과하는 동안 오디오가 어느 세션에도 기록되지 않아 회의 도입부를 놓친다.
     /// 캡처를 유지하면 바뀌는 것은 발화가 기록될 산출물뿐이다.
     func startNewSession() async {
+        guard !isChangingSession, !isChangingLanguage else { return }
         switch state {
         case .recording:
-            await rotateWhileRecording()
+            isChangingSession = true
+            if engine == .qwen3 { await rotateQwenWhileRecording() }
+            else { await rotateWhileRecording() }
+            isChangingSession = false
         case .idle, .failed:
             // 대기 중에는 화면만 비운다. 다음 시작이 새 산출물을 만든다.
             timeline.reset()
@@ -857,19 +961,20 @@ final class MeetingRecorder {
         // 이전 세션의 시간축을 완전하게 닫는다. 종료와 같은 순서를 쓴다 — 경계에서도 이전
         // 세션의 회의록이 곧 생성되므로, 기다리지 않으면 이 발화들이 그 이후에 도착해 이전
         // 회의의 두 산출물에서 함께 빠진다.
-        await drainPendingUtterances(into: previousStore)
-
         do {
+            try await drainPendingUtterances(into: previousStore)
             // 이 세션이 쓰고 있는 루트를 그대로 쓴다. 경계에서 다시 결정하면 회의 도중 볼륨이
             // 분리된 경우 앞뒤 회의가 서로 다른 폴더로 갈라지고, 저장 위치는 녹취 중에 바뀌지
             // 않는다는 계약과도 어긋난다.
             guard let root = sessionRoot else {
                 throw RecorderError.noWritableTranscriptRoot
             }
-            let store = try TranscriptStore(startedAt: boundary, root: root)
+            let store = try TranscriptStore(startedAt: boundary, root: root, engine: engine)
             // 오디오도 같은 경계에서 갈아 끼운다. 컨테이너를 닫아야 파일이 열린다.
             let audioFiles = audioRecorder?.rotate(to: store.sessionDirectory) ?? []
-            lastSessionDirectory = await previousStore?.finalize(audioFiles: audioFiles)
+            lastSessionDirectory = previousStore?.sessionDirectory
+            do { _ = try await previousStore?.finalize(audioFiles: audioFiles) }
+            catch { transcriptionWarning = error.localizedDescription }
 
             // 자동 열기는 녹취 종료에만 결부된다 — 경계에서는 열지 않는다.
             SessionFolderPolicy.openAtBoundary(
@@ -895,6 +1000,47 @@ final class MeetingRecorder {
         }
     }
 
+    /// Closes original audio immediately, drains pre-boundary Qwen results into the old store,
+    /// then releases post-boundary results. Capture keeps running throughout inference.
+    private func rotateQwenWhileRecording() async {
+        guard let root = sessionRoot, let transcription else { return }
+        do {
+            let boundary = environment.now()
+            let next = try TranscriptStore(startedAt: boundary, root: root, engine: engine)
+            let previous = store
+            let markers = captures.values.map { $0.boundaryMarker() }
+            let audio = audioRecorder
+            let directory = next.sessionDirectory
+            let audioFiles = await captureBoundary.rotate {
+                for marker in markers { marker() }
+                return audio?.rotate(to: directory) ?? []
+            }
+            let offsets = await transcription.checkpoint(until: environment.finalizationTimeout)
+            if offsets.count != transcription.sessions.count {
+                transcriptionWarning = tr(
+                    "일부 Qwen3 입력을 세션 경계에서 마무리하지 못했습니다. 저장에 성공한 결과는 남아 있습니다.",
+                    "Some Qwen3 input could not finish at the session boundary. Successfully saved results were retained."
+                )
+            }
+            do { try await drainPendingUtterances(into: previous) }
+            catch { transcriptionWarning = error.localizedDescription }
+            lastSessionDirectory = previous?.sessionDirectory
+            do { _ = try await previous?.finalize(audioFiles: audioFiles) }
+            catch { transcriptionWarning = error.localizedDescription }
+            store = next
+            qwenSessionOffsets = offsets
+            currentSessionDirectory = next.sessionDirectory
+            startedAt = boundary
+            timeline.reset()
+            segments = []
+            await transcription.resumeAfterCheckpoint()
+        } catch {
+            sourceWarning = tr("새 세션을 시작하지 못했습니다: \(error.localizedDescription)",
+                               "Couldn't start a new session: \(error.localizedDescription)")
+            await transcription.resumeAfterCheckpoint()
+        }
+    }
+
     func dismissError() {
         if case .failed = state { state = .idle }
     }
@@ -905,12 +1051,18 @@ final class MeetingRecorder {
         let runID = transcription?.id
         return LanguageArbiter { [weak self] segment in
             guard let self, let runID, self.transcription?.id == runID else { return }
-            await self.commit(segment)
+            do { try await self.commit(segment) }
+            catch { self.transcriptionWarning = error.localizedDescription }
         }
     }
 
     /// 전사기에서 갓 나온 결과를 받는다. 다국어면 중재를 거친다.
-    private func handle(_ raw: TranscriptSegment) async {
+    private func handle(_ raw: TranscriptSegment) async throws {
+        if engine == .qwen3 {
+            let offset = qwenSessionOffsets[raw.speaker] ?? 0
+            try await commit(offset > 0 ? raw.shiftingTime(by: offset) : raw)
+            return
+        }
         guard !isAlreadyRecordedBeforeBoundary(raw) else { return }
 
         // 세션 경계를 지났으면 시간축을 현재 세션 기준으로 옮긴다. 중재보다 먼저
@@ -920,13 +1072,13 @@ final class MeetingRecorder {
             : raw
 
         guard let arbiter = arbiters[segment.speaker] else {
-            await commit(segment)
+            try await commit(segment)
             return
         }
         // 중재기가 통과시킨 것만 즉시 반영한다. 확정 결과는 유예 후
         // commit(_:)으로 되돌아온다.
         if let passthrough = arbiter.submit(segment) {
-            await commit(passthrough)
+            try await commit(passthrough)
         }
     }
 
@@ -956,8 +1108,8 @@ final class MeetingRecorder {
     ///
     /// 실측: 같은 순서를 재현한 프로브에서 200회 중 200회 유실됐고, 화면에 5개가 표시된
     /// 시점의 저장분이 0개였다 — 드물게 지는 경합이 아니라 기본적으로 지는 순서였다.
-    private func commit(_ segment: TranscriptSegment) async {
-        await Self.commit(segment, to: timeline, store: store)
+    private func commit(_ segment: TranscriptSegment) async throws {
+        try await Self.commit(segment, to: timeline, store: store)
         segments = timeline.displaySegments
     }
 
@@ -970,9 +1122,12 @@ final class MeetingRecorder {
         _ segment: TranscriptSegment,
         to timeline: TranscriptTimeline,
         store: TranscriptStore?
-    ) async {
-        guard let finalized = timeline.ingest(segment) else { return }
-        await store?.append(finalized)
+    ) async throws {
+        if segment.isFinal {
+            guard let store else { throw CocoaError(.fileWriteUnknown) }
+            try await store.append(segment)
+        }
+        timeline.ingest(segment)
     }
 
     private func teardown() {
@@ -990,6 +1145,8 @@ final class MeetingRecorder {
         currentSessionDirectory = nil
         sessionRoot = nil
         sessionTimeOffset = 0
+        qwenSessionOffsets = [:]
+        languageOperationID = nil
         microphoneMuted = false
         // 세션 종료는 설치된 언어의 구독을 해제할 이유가 아니다. macOS 26.6.2에서
         // 예약 release가 transcription.en/ko 구독까지 해제해 설치 목록이 빈 배열이
@@ -1022,6 +1179,7 @@ final class MeetingRecorder {
     }
 
     private func reconcileLanguageSelection() {
+        guard engine == .speechAnalyzer, !state.isBusy else { return }
         let available = modelManager.availableLanguages
         guard !available.isEmpty else { return }
         let preferred = RecordingPreferences.language()

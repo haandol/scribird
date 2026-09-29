@@ -55,7 +55,7 @@ struct QwenFileTranscriber: FileTranscribing {
 
     /// Reuses a prepared environment and installs locked dependencies only for initial setup.
     /// Fails the selected Qwen3 task if an external prerequisite is missing or installation fails.
-    private static func preparePython(runtime: URL) async throws -> URL {
+    static func preparePython(runtime: URL) async throws -> URL {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                  appropriateFor: nil, create: true)
         let candidates = ["/opt/homebrew/bin/uv", "/usr/local/bin/uv",

@@ -1,5 +1,6 @@
 """Pinned local Qwen3 inference; stdout is a JSONL protocol, diagnostics use stderr."""
 import argparse
+import base64
 import contextlib
 import json
 import math
@@ -92,8 +93,10 @@ def main():
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.default_int_handler)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--audio", required=True)
-    parser.add_argument("--language", choices=["english", "korean"], required=True)
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--audio")
+    inputs.add_argument("--live", action="store_true")
+    parser.add_argument("--language", choices=["english", "korean"])
     args = parser.parse_args()
     protocol = sys.stdout
     def emit(event):
@@ -102,11 +105,40 @@ def main():
         protocol.flush()
     try:
         with contextlib.redirect_stdout(sys.stderr):
-            transcribe(args.audio, args.language, emit)
+            if args.live:
+                live(sys.stdin, emit)
+            else:
+                if args.language is None:
+                    raise ValueError("File transcription requires a language")
+                transcribe(args.audio, args.language, emit)
     except Exception as error:
         print(f"Qwen3 transcription failed: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def live(input_lines, emit):
+    """Load once per source and recognize independent PCM chunks without sharing conversation state."""
+    import numpy as np
+    from mlx_audio.stt import load
+    model = load(str(model_directory()))
+    emit({"event": "ready"})
+    for line in input_lines:
+        request = json.loads(line)
+        language = request["language"]
+        if language not in ("english", "korean", "auto"):
+            raise ValueError("Unsupported live language")
+        samples = np.frombuffer(base64.b64decode(request["audio"], validate=True), dtype="<f4").copy()
+        if not 0 < len(samples) <= 20 * 16000 or not np.isfinite(samples).all():
+            raise ValueError("Invalid live PCM chunk")
+        text = ""
+        if np.max(np.abs(samples)) > 1e-7:
+            result = model.generate(samples, language=None if language == "auto" else language.title(),
+                                    max_tokens=1024, verbose=False)
+            if result.generation_tokens >= 1024:
+                raise RuntimeError("Qwen3 reached the decoding limit; the chunk was not saved as a complete transcript.")
+            text = result.text.strip()
+        emit({"event": "result", "text": text})
 
 
 if __name__ == "__main__":

@@ -11,6 +11,48 @@ import XCTest
 ///
 /// 하드웨어는 쓰지 않는다 — 버퍼를 직접 만들어 넣고 나오는 결과를 본다.
 final class AnalyzerInputPumpTests: XCTestCase {
+    func test_boundaryMarkerOnFullQueue_reportsEvictedAudio() async {
+        let pump = pump()
+        let stream = pump.makeInputStream()
+        let format = captureFormat(sampleRate: 16_000, channels: 1, interleaved: false)
+        for _ in 0..<256 { pump.submit(buffer(format, frames: 1600, amplitude: 0.5)) }
+        pump.markBoundary()
+        pump.finish()
+        var audioBuffers = 0
+        var markers = 0
+        var first: Double?
+        for await input in stream {
+            first = first ?? input.bufferStartTime?.seconds
+            if input.buffer.frameLength == 0 { markers += 1 } else { audioBuffers += 1 }
+        }
+        XCTAssertEqual(audioBuffers, 255)
+        XCTAssertEqual(markers, 1)
+        XCTAssertEqual(first ?? -1, 0.1, accuracy: 0.000001)
+        XCTAssertEqual(pump.droppedInputDuration, 0.1, accuracy: 0.000001)
+    }
+
+    func test_slowConsumer_reportsDroppedAudioDuration() async {
+        let pump = pump()
+        let stream = pump.makeInputStream()
+        for _ in 0..<400 { pump.submit(buffer(captureFormat(), frames: 4800, amplitude: 0.5)) }
+        pump.finish()
+        var delivered = 0
+        var buffers = 0
+        var firstRetainedTime: Double?
+        var end = 0.0
+        for await input in stream {
+            firstRetainedTime = firstRetainedTime ?? input.bufferStartTime?.seconds
+            delivered += Int(input.buffer.frameLength)
+            buffers += 1
+            end = (input.bufferStartTime?.seconds ?? 0) + Double(input.buffer.frameLength) / 16_000
+        }
+        XCTAssertEqual(buffers, 256)
+        XCTAssertGreaterThan(pump.droppedInputDuration, 14.3)
+        // Resampler priming is not queue loss. Account exactly for the produced input timeline.
+        XCTAssertEqual(pump.droppedInputDuration, firstRetainedTime ?? -1, accuracy: 0.000001)
+        XCTAssertEqual(Double(delivered) / 16_000 + pump.droppedInputDuration, end, accuracy: 0.000001)
+    }
+
 
     /// 전사기가 요구하는 형식. 실제 파이프라인과 같은 16kHz 모노다.
     private var targetFormat: AVAudioFormat {

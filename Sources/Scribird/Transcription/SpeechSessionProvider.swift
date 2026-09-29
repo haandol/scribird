@@ -62,6 +62,9 @@ struct SystemSpeechSessionProvider: SpeechSessionProviding {
                 reserved: await SpeechModelInstaller.reservedLocales()
             )
         }
-        return MeetingRecorder.retentionWarning(for: reservation.unreserved)
+        return MeetingRecorder.retentionWarning(
+            for: reservation.unreserved, requested: locales,
+            reserved: await SpeechModelInstaller.reservedLocales()
+        )
     }
 }

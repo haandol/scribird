@@ -3,7 +3,8 @@
 This worker runs **Alkd/Qwen3-ASR-1.7B-MLX-8bit** locally on Apple Silicon.
 The model revision is pinned to `b85224831c8109b261947e4c6daf5e89823f9c76`;
 the Python/MLX dependencies are pinned by `uv.lock`. It is an optional engine for
-file transcription. Live meeting capture continues to use SpeechAnalyzer.
+file transcription and live meeting recording. Live recording uses one persistent
+worker per source so microphone and system audio never share recognition context.
 
 The app bundles the worker, project/lock files, and feature-extractor configuration.
 On first use it uses `uv` to prepare Python 3.12 under
@@ -41,3 +42,11 @@ Force-killing the app/OS can leave temporary files. Per-chunk transcripts alread
 saved in the output directory remain recoverable. MCP uses a dedicated process
 group so cancellation reaches Scribird and its Qwen3 child without terminating a
 user's live app.
+
+The bundled `--live` worker loads its model before reporting readiness. The app sends
+16 kHz mono Float32 chunks through stdin and receives JSONL results through stdout;
+neither pipe is a network connection. English and Korean are explicit language prompts;
+the combined live setting uses the model's automatic language detection. A source's model
+is reused until recording stops. Empty results still complete their chunk, and malformed
+responses, decoding limits and process failures are errors. Session boundaries wait for
+preceding results to be persisted before later results enter the new transcript store.

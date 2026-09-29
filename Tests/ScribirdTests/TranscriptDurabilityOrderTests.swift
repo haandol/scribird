@@ -65,10 +65,10 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     /// 이 카운터가 순서 위반을 드러내는 유일한 신호다.
     func test_appendAfterFinalize_isCountedNotSilentlyDropped() async throws {
         let store = try makeStore()
-        await store.append(segment("회의 중 발화입니다.", 0, 1.5))
-        _ = await store.finalize(audioFiles: [])
+        try await store.append(segment("회의 중 발화입니다.", 0, 1.5))
+        _ = try await store.finalize(audioFiles: [])
 
-        await store.append(segment("닫힌 뒤 도착했습니다.", 2, 3))
+        try? await store.append(segment("닫힌 뒤 도착했습니다.", 2, 3))
 
         let dropped = await store.droppedAfterFinalize
         XCTAssertEqual(dropped, 1,
@@ -81,10 +81,10 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     /// 기록도 읽기용 회의록도 그 발화를 갖지 못한다.
     func test_appendAfterFinalize_missesBothOutputs() async throws {
         let store = try makeStore()
-        await store.append(segment("남아야 하는 발화.", 0, 1))
-        let directory = await store.finalize(audioFiles: [])
+        try await store.append(segment("남아야 하는 발화.", 0, 1))
+        let directory = try await store.finalize(audioFiles: [])
 
-        await store.append(segment("사라지는 발화.", 2, 3))
+        try? await store.append(segment("사라지는 발화.", 2, 3))
 
         XCTAssertFalse(try jsonl(directory).contains("사라지는 발화."),
                        "닫힌 세션에 기록됐다 — 이 테스트의 전제가 깨졌다")
@@ -100,9 +100,9 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
         let store = try makeStore()
 
         for index in 0..<5 {
-            await store.append(segment("발화\(index)", Double(index), Double(index) + 0.5))
+            try await store.append(segment("발화\(index)", Double(index), Double(index) + 0.5))
         }
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
 
         let dropped = await store.droppedAfterFinalize
         XCTAssertEqual(dropped, 0, "정상 순서인데도 발화가 버려졌다")
@@ -126,7 +126,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
         let store = try makeStore()
         let timeline = TranscriptTimeline()
 
-        await MeetingRecorder.commit(segment("화면에 보인 발화.", 0, 1.5), to: timeline, store: store)
+        try await MeetingRecorder.commit(segment("화면에 보인 발화.", 0, 1.5), to: timeline, store: store)
 
         // 반환된 직후 — 아무것도 더 기다리지 않고 — 이미 디스크에 있어야 한다.
         let directory = await store.sessionDirectory
@@ -143,14 +143,14 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
         let timeline = await TranscriptTimeline()
 
         for index in 0..<5 {
-            await MeetingRecorder.commit(
+            try await MeetingRecorder.commit(
                 segment("발화\(index)", Double(index), Double(index) + 0.5),
                 to: timeline,
                 store: store
             )
         }
         // 기다리는 것 없이 곧바로 종료한다.
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
 
         let dropped = await store.droppedAfterFinalize
         XCTAssertEqual(dropped, 0, "\(dropped)개가 세션이 닫힌 뒤에 도착했다")
@@ -175,7 +175,8 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     func test_flushingArbiter_completesBeforeReturning() async throws {
         let store = try makeStore()
         let arbiter = await LanguageArbiter { segment in
-            await store.append(segment)
+            do { try await store.append(segment) }
+            catch { XCTFail("Unexpected archive failure: \(error)") }
         }
 
         _ = await arbiter.submit(segment("중재를 기다리는 발화.", 0, 1.5))
@@ -183,7 +184,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
         await arbiter.flush()
 
         // flush가 반환된 시점에 이미 기록돼 있어야 한다 — 여기서 finalize가 이어진다.
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
 
         XCTAssertTrue(try jsonl(directory).contains("중재를 기다리는 발화."),
                       "중재 확정을 기다리지 않아 발화가 기록 전에 세션이 닫혔다")
@@ -199,7 +200,8 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
     func test_flushingArbiter_persistsEveryPendingSegment() async throws {
         let store = try makeStore()
         let arbiter = await LanguageArbiter { segment in
-            await store.append(segment)
+            do { try await store.append(segment) }
+            catch { XCTFail("Unexpected archive failure: \(error)") }
         }
 
         // 시간이 겹치지 않게 넣어 각각 별개 라운드가 되게 한다.
@@ -208,7 +210,7 @@ final class TranscriptDurabilityOrderTests: XCTestCase {
             _ = await arbiter.submit(segment("대기\(index)", start, start + 1))
         }
         await arbiter.flush()
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
 
         let contents = try jsonl(directory)
         for index in 0..<4 {

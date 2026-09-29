@@ -13,6 +13,7 @@ struct MeetingLanguagePicker: View {
                 Text(language.displayName).tag(language)
             }
         }
-        .disabled(recorder.availableLanguages.isEmpty || recorder.isPreparingModel)
+        .disabled(recorder.availableLanguages.isEmpty || recorder.isPreparingModel
+                  || recorder.isChangingSession || recorder.isChangingLanguage || recorder.state == .stopping)
     }
 }

@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 struct RecordingEnvironment {
     var speech: any SpeechSessionProviding = SystemSpeechSessionProvider()
+    var qwen: any SpeechSessionProviding = QwenSessionProvider()
     var makeCapture: @MainActor (
         Speaker, AVAudioFormat, AudioRecorder?, String?
     ) async throws -> any CaptureSource = systemCapture

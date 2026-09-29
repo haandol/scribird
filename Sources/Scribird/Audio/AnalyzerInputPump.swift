@@ -25,6 +25,10 @@ protocol AudioLevelSource {
 /// **소스별 독립은 이 프로토콜을 공유하는 것이 아니라 인스턴스를 따로 갖는 것으로 지킨다.**
 /// 한쪽이 실패해도 다른 쪽이 계속 흐르는 것은 조정자가 각 소스를 따로 열고 따로 접기 때문이다.
 protocol CaptureSource: AudioLevelSource {
+    var droppedInputDuration: TimeInterval { get }
+    var formatWarning: String? { get }
+    func useBoundaryCoordinator(_ coordinator: CaptureBoundaryCoordinator)
+    func boundaryMarker() -> @Sendable () -> Void
     /// 장치를 열고 캡처를 시작한다. 실패는 던진다 — 조용히 실패하면 무음 회의록이 남는다.
     func start() throws
     /// 캡처를 멈추고 입력 스트림을 닫는다. 이것으로 전사기가 마무리에 들어간다.
@@ -35,6 +39,13 @@ protocol CaptureSource: AudioLevelSource {
     func reconnect() throws
     /// 대상 장치를 바꿔 다시 연결한다. nil이면 시스템 기본으로 되돌린다.
     func reconnect(toDeviceUID uid: String?) throws
+}
+
+extension CaptureSource {
+    var droppedInputDuration: TimeInterval { 0 }
+    var formatWarning: String? { nil }
+    func useBoundaryCoordinator(_ coordinator: CaptureBoundaryCoordinator) {}
+    func boundaryMarker() -> @Sendable () -> Void { {} }
 }
 
 /// 캡처 버퍼를 전사기 입력 스트림으로 흘려보내는 배관.
@@ -62,6 +73,30 @@ final class AnalyzerInputPump: @unchecked Sendable {
     private var framesSent: AVAudioFramePosition = 0
     /// 마이크 내용을 전사·저장하지 않고 같은 길이의 무음으로 바꿀지.
     private var muted = false
+    private var droppedFrames: AVAudioFramePosition = 0
+    private var boundaryCoordinator = CaptureBoundaryCoordinator()
+
+    /// Reports queue overflow in seconds so a moving input meter cannot conceal lost transcription input.
+    var droppedInputDuration: TimeInterval {
+        lock.withLock { Double(droppedFrames) / targetFormat.sampleRate }
+    }
+
+    /// Both capture paths share this coordinator for the lifetime of a recording.
+    func useBoundaryCoordinator(_ coordinator: CaptureBoundaryCoordinator) {
+        lock.withLock { boundaryCoordinator = coordinator }
+    }
+
+    /// Zero-length input is an internal Qwen boundary marker; hardware empty buffers are never submitted.
+    func markBoundary() {
+        let state = lock.withLock { (continuation, framesSent) }
+        guard let marker = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: 1) else { return }
+        marker.frameLength = 0
+        if let continuation = state.0 {
+            yield(AnalyzerInput(buffer: marker, bufferStartTime: CMTime(
+                value: state.1, timescale: CMTimeScale(targetFormat.sampleRate)
+            )), to: continuation)
+        }
+    }
 
     /// 입력 레벨. 미터 표시와 무음 감지에 함께 쓴다.
     let level = AudioLevelTracker()
@@ -119,6 +154,12 @@ final class AnalyzerInputPump: @unchecked Sendable {
     /// 캡처 포맷이 바뀌면 변환기를 다시 만든다 — 입력 장치를 갈아 끼우면 마이크
     /// 경로에서 실제로 일어난다.
     func submit(_ buffer: AVAudioPCMBuffer, hostTime: UInt64? = nil) {
+        let coordinator = lock.withLock { boundaryCoordinator }
+        coordinator.submit { process(buffer, hostTime: hostTime) }
+    }
+
+    /// Runs original recording and analyzer delivery within one capture-boundary exclusion region.
+    private func process(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
         guard buffer.frameLength > 0 else { return }
 
         let muted = lock.withLock { self.muted }
@@ -173,6 +214,13 @@ final class AnalyzerInputPump: @unchecked Sendable {
         )
         lock.withLock { framesSent += AVAudioFramePosition(outputBuffer.frameLength) }
 
-        continuation.yield(AnalyzerInput(buffer: outputBuffer, bufferStartTime: startTime))
+        yield(AnalyzerInput(buffer: outputBuffer, bufferStartTime: startTime), to: continuation)
+    }
+
+    /// Control markers share queue capacity with audio and must account for the audio they evict too.
+    private func yield(_ input: AnalyzerInput, to continuation: AsyncStream<AnalyzerInput>.Continuation) {
+        if case .dropped(let lost) = continuation.yield(input) {
+            lock.withLock { droppedFrames += AVAudioFramePosition(lost.buffer.frameLength) }
+        }
     }
 }

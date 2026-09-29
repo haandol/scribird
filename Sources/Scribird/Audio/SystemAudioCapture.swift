@@ -110,6 +110,10 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
 
     /// 세션 전체 최대 진폭. 0에 가까우면 재생 중인 소리가 없거나 권한이 없다는 뜻.
     var peakLevel: Float { pump.peakLevel }
+    var droppedInputDuration: TimeInterval { pump.droppedInputDuration }
+    var formatWarning: String? { rateMonitor.warning }
+    func useBoundaryCoordinator(_ coordinator: CaptureBoundaryCoordinator) { pump.useBoundaryCoordinator(coordinator) }
+    func boundaryMarker() -> @Sendable () -> Void { { [pump] in pump.markBoundary() } }
 
     func start() throws {
         guard #available(macOS 14.4, *) else { throw CaptureError.unsupportedOS }

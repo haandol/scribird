@@ -19,6 +19,9 @@ struct TranscriptSegment: Identifiable, Sendable {
     let localeIdentifier: String?
     /// 단어 단위 조각. 다국어 중재가 이 단위로 판정한다.
     let tokens: [Token]
+    let engine: String?
+    let model: String?
+    let timestampGranularity: String?
 
     init(
         id: UUID = UUID(),
@@ -28,7 +31,10 @@ struct TranscriptSegment: Identifiable, Sendable {
         isFinal: Bool,
         confidence: Double? = nil,
         localeIdentifier: String? = nil,
-        tokens: [Token] = []
+        tokens: [Token] = [],
+        engine: String? = nil,
+        model: String? = nil,
+        timestampGranularity: String? = nil
     ) {
         self.id = id
         self.speaker = speaker
@@ -38,6 +44,9 @@ struct TranscriptSegment: Identifiable, Sendable {
         self.confidence = confidence
         self.localeIdentifier = localeIdentifier
         self.tokens = tokens
+        self.engine = engine
+        self.model = model
+        self.timestampGranularity = timestampGranularity
     }
 
     /// 전사기가 보고한 단어 단위 조각.
@@ -89,7 +98,7 @@ struct TranscriptSegment: Identifiable, Sendable {
                     range: $0.range.shiftedClampingToZero(by: delta),
                     confidence: $0.confidence
                 )
-            }
+            }, engine: engine, model: model, timestampGranularity: timestampGranularity
         )
     }
 
@@ -109,7 +118,7 @@ struct TranscriptSegment: Identifiable, Sendable {
             isFinal: isFinal,
             confidence: confidence,
             localeIdentifier: localeIdentifier ?? self.localeIdentifier,
-            tokens: tokens
+            tokens: tokens, engine: engine, model: model, timestampGranularity: timestampGranularity
         )
     }
 }
@@ -124,6 +133,9 @@ extension TranscriptSegment {
         let text: String
         let confidence: Double?
         let locale: String?
+        var engine: String? = nil
+        var model: String? = nil
+        var timestampGranularity: String? = nil
     }
 
     var record: Record {
@@ -134,7 +146,8 @@ extension TranscriptSegment {
             end: end,
             text: text,
             confidence: confidence,
-            locale: localeIdentifier
+            locale: localeIdentifier,
+            engine: engine, model: model, timestampGranularity: timestampGranularity
         )
     }
 }
@@ -155,4 +168,3 @@ extension CMTimeRange {
         )
     }
 }
-

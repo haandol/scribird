@@ -49,13 +49,13 @@
         },
         {
           "path": "docs/adr/transcription/0003-model-provisioning-gate.md",
-          "status": "Accepted (2026-08-21)",
-          "summary": "필수 English 모델은 앱 시작 시 자동 설치하고 한국어는 설정에서 관리하며 설치 요청은 예약·진행률 취소와 분리하고 최종 설치 목록으로 성공을 판정한다"
+          "status": "Accepted (2026-09-29)",
+          "summary": "SpeechAnalyzer의 필수 English 자동 설치·한국어 명시 설치·예약 분리를 유지하며 Apple Speech 설치 상태로 Qwen3 녹취를 막지 않는다"
         },
         {
           "path": "docs/adr/transcription/0004-in-session-language-switch.md",
-          "status": "Accepted (2026-08-21)",
-          "summary": "설치된 회의 언어만 녹취 중 전환하고 캡처·회의 음성·회의록은 끊지 않으며 English는 필수 기본 모델로 유지한다"
+          "status": "Accepted (2026-09-29)",
+          "summary": "SpeechAnalyzer는 설치된 회의 언어만 녹취 중 전환하고 Qwen3는 독립된 언어 조건을 적용하며 캡처·회의 음성·회의록을 유지한다"
         },
         {
           "path": "docs/adr/transcription/0005-local-media-file-transcription.md",
@@ -64,8 +64,8 @@
         },
         {
           "path": "docs/adr/transcription/0006-selectable-local-file-asr.md",
-          "status": "Accepted (2026-09-28)",
-          "summary": "파일 전사는 SpeechAnalyzer와 Alkd/Qwen3-ASR-1.7B-MLX-8bit를 선택하며 로컬 실행·사전 환경 안내·엔진별 시간 정밀도를 보장하고 자동 대체하지 않는다"
+          "status": "Accepted (2026-09-29)",
+          "summary": "실시간 설정과 파일 작업에서 SpeechAnalyzer·Qwen3를 선택하며 로컬 실행·소스 격리·구간 시간·즉시 저장을 유지하고 자동 대체하지 않는다"
         }
       ],
       "dependsOn": [

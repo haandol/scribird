@@ -1,5 +1,7 @@
 """Check model-cache and chunk-completion contracts without downloading or running a model."""
 import tempfile
+import base64
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +17,22 @@ import transcribe as worker
 
 
 class QwenWorkerTests(unittest.TestCase):
+    def test_liveChunks_reuseModelAndPreserveExplicitOrAutomaticLanguage(self):
+        """Two independent chunks load once, with auto detection reserved for the mixed setting."""
+        from unittest.mock import Mock
+        model = Mock()
+        model.generate.return_value = SimpleNamespace(text="recognized", generation_tokens=1)
+        audio = base64.b64encode(np.full(1600, 0.1, dtype="<f4").tobytes()).decode()
+        requests = [json.dumps({"audio": audio, "language": language}) for language in ["english", "auto"]]
+        events = []
+        with patch.object(worker, "model_directory", return_value=self.snapshot), \
+             patch("mlx_audio.stt.load", return_value=model) as load:
+            worker.live(requests, events.append)
+        load.assert_called_once()
+        self.assertEqual([c.kwargs["language"] for c in model.generate.call_args_list], ["English", None])
+        self.assertEqual(events, [{"event": "ready"}, {"event": "result", "text": "recognized"},
+                                  {"event": "result", "text": "recognized"}])
+
     def setUp(self):
         """Keep all generated cache and media under a private disposable root."""
         self.temp = tempfile.TemporaryDirectory()

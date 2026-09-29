@@ -179,6 +179,29 @@ struct SettingsView: View {
     private var recordingTab: some View {
         Form {
             Section(tr("전사", "Transcription")) {
+                Picker(tr("전사 엔진", "Transcription engine"), selection: Binding(
+                    get: { recorder.engine }, set: { recorder.chooseEngine($0) }
+                )) {
+                    ForEach(FileTranscriptionEngine.allCases) { engine in
+                        Text(engine.displayName).tag(engine)
+                    }
+                }
+                .disabled(recorder.state.isBusy)
+                Text(recorder.state.isBusy
+                     ? tr("녹취를 마친 뒤 엔진을 변경할 수 있습니다.", "Finish recording before changing the engine.")
+                     : tr("다음 실시간 녹취부터 적용합니다. 파일 전사의 선택은 별도로 유지됩니다.",
+                          "Applies to the next live recording. File transcription has its own engine selection."))
+                    .captionStyle(.secondary)
+                if recorder.engine == .qwen3 {
+                    Text(FileTranscriptionEngine.qwen3.setupNotice())
+                        .captionStyle(.secondary)
+                    Text(tr("구간별로 결과가 표시됩니다. 단어별 실시간 갱신이나 정확한 발화 경계는 제공하지 않습니다.",
+                            "Results appear in chunks, without word-by-word updates or exact utterance boundaries."))
+                        .captionStyle(.secondary)
+                }
+                if let warning = recorder.engineWarning {
+                    Text(warning).captionStyle(.orange)
+                }
                 // 녹취 중에도 바꿀 수 있다. 전환은 캡처와 회의 음성을 끊지 않고 전사기만
                 // 갈아 끼우므로, 언어가 틀렸다는 것을 회의 중에 발견해도 고칠 수 있다.
                 MeetingLanguagePicker(
@@ -428,8 +451,8 @@ struct SettingsView: View {
     private var updateStatusRow: some View {
         switch updateChecker.status {
         case .idle:
-            Text(tr("확인을 누를 때만 릴리즈 정보를 조회합니다. 그 외에는 네트워크를 쓰지 않습니다.",
-                     "Release info is fetched only when you press check. Nothing else uses the network."))
+            Text(tr("확인을 누를 때만 릴리즈 정보를 조회합니다. 음성 모델을 처음 준비할 때도 인터넷이 필요할 수 있습니다.",
+                     "Release info is fetched only when you press check. Initial speech model setup may also need internet access."))
                 .captionStyle(.secondary)
 
         case .checking:

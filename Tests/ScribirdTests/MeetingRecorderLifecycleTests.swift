@@ -12,6 +12,7 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
     private let preferenceKeys = [
         "transcriptionLanguage", "savesOriginalAudio", "opensSessionFolderOnStop",
         "transcriptRootPath", "pinnedInputDeviceUID", "pinnedOutputDeviceUID",
+        "liveTranscriptionEngine",
     ]
 
     override func setUp() async throws {
@@ -23,6 +24,7 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
             savedPreferences[key] = UserDefaults.standard.object(forKey: key)
         }
         RecordingPreferences.save(language: .english)
+        RecordingPreferences.save(engine: .speechAnalyzer)
         RecordingPreferences.save(savesAudio: false)
         RecordingPreferences.save(opensFolderOnStop: false)
     }
@@ -57,6 +59,134 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
         XCTAssertTrue(try markdown(directory).contains("remaining source"))
         XCTAssertEqual(recorder.state, .idle)
         XCTAssertEqual(harness.captures[.remote]?.first?.stopCount, 1)
+    }
+
+    func test_engineChangeWhileRecording_preservesActiveAndStoredEngine() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        await recorder.start()
+        recorder.chooseEngine(.qwen3)
+        XCTAssertEqual(recorder.engine, .speechAnalyzer)
+        XCTAssertEqual(RecordingPreferences.engine(), .speechAnalyzer)
+        XCTAssertNotNil(recorder.engineWarning)
+        await recorder.stop()
+        recorder.chooseEngine(.qwen3)
+        XCTAssertEqual(harness.makeRecorder().engine, .qwen3)
+    }
+
+    func test_qwenSelection_allowsAllMeetingLanguagesWithoutAppleAssets() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder(models: MissingModels())
+        XCTAssertFalse(recorder.canStartRecording)
+        recorder.chooseEngine(.qwen3)
+        XCTAssertTrue(recorder.canStartRecording)
+        XCTAssertEqual(Set(recorder.availableLanguages), Set(TranscriptionLanguage.allCases))
+        await recorder.chooseLanguage(.auto)
+        await recorder.start()
+        XCTAssertEqual(recorder.state, .recording)
+        XCTAssertEqual(harness.qwenProvider.prepareCount, 1)
+        XCTAssertEqual(harness.provider.prepareCount, 0)
+        await recorder.chooseLanguage(.korean)
+        XCTAssertEqual(recorder.language, .korean)
+        await recorder.stop()
+    }
+
+    func test_reclaimedRequestedLanguage_failsBeforePreparingAnotherLanguage() async {
+        RecordingPreferences.save(language: .auto)
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder(models: EnglishOnlyModels())
+        await recorder.start()
+        guard case .failed = recorder.state else { return XCTFail("Missing Korean must not silently select English") }
+        XCTAssertEqual(recorder.language, .auto)
+        XCTAssertEqual(RecordingPreferences.language(), .auto)
+        XCTAssertEqual(harness.provider.prepareCount, 0)
+        XCTAssertTrue(harness.captures.isEmpty)
+    }
+
+    func test_secondSourceLanguageFailure_restoresTheFirstSource() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        recorder.chooseEngine(.qwen3)
+        await recorder.start()
+        let remote = try XCTUnwrap(harness.qwenProvider.latest[.remote])
+        await remote.failLanguageChanges()
+        await recorder.chooseLanguage(.korean)
+        XCTAssertEqual(recorder.language, .english)
+        XCTAssertEqual(RecordingPreferences.language(), .english)
+        let microphoneChanges = await harness.qwenProvider.latest[.me]?.localeChanges
+        XCTAssertEqual(microphoneChanges, [["ko-KR"], ["en-US"]])
+        XCTAssertNotNil(recorder.languageSwitchWarning)
+        await recorder.stop()
+    }
+
+    func test_engineChangesDuringPreparationAndStopping_areRejected() async throws {
+        let harness = RecordingHarness(root: root)
+        let entered = expectation(description: "preparing capture")
+        let release = AsyncTestGate()
+        harness.beforeCapture = { speaker in
+            if speaker == .me { entered.fulfill(); await release.wait() }
+        }
+        let recorder = harness.makeRecorder()
+        let start = Task { await recorder.start() }
+        await fulfillment(of: [entered], timeout: 2)
+        recorder.chooseEngine(.qwen3)
+        XCTAssertEqual(recorder.engine, .speechAnalyzer)
+        XCTAssertEqual(RecordingPreferences.engine(), .speechAnalyzer)
+        await release.open()
+        await start.value
+        harness.provider.blocksCleanup = true
+        // These sessions were already constructed. Block their finalization explicitly.
+        let finishGate = AsyncTestGate()
+        for session in harness.provider.latest.values { await session.blockFinish(on: finishGate) }
+        let stop = Task { await recorder.stop() }
+        await harness.provider.finishStarted.wait()
+        XCTAssertEqual(recorder.state, .stopping)
+        recorder.chooseEngine(.qwen3)
+        XCTAssertEqual(recorder.engine, .speechAnalyzer)
+        XCTAssertEqual(RecordingPreferences.engine(), .speechAnalyzer)
+        await finishGate.open()
+        await stop.value
+    }
+
+    func test_languageValidationCompletingAfterStop_doesNotChangeNextRecordingPreferences() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        recorder.chooseEngine(.qwen3)
+        await recorder.start()
+        let gate = AsyncTestGate()
+        harness.qwenProvider.switchRelease = gate
+        let change = Task { await recorder.chooseLanguage(.korean) }
+        await harness.qwenProvider.switchStarted.wait()
+        await recorder.stop()
+        await gate.open()
+        await change.value
+        XCTAssertEqual(recorder.language, .english)
+        XCTAssertEqual(RecordingPreferences.language(), .english)
+    }
+
+    func test_oldLanguageRollback_cannotWarnOrFailANewRecording() async throws {
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder()
+        recorder.chooseEngine(.qwen3)
+        await recorder.start()
+        let old = harness.qwenProvider.latest
+        let entered = AsyncTestGate()
+        let release = AsyncTestGate()
+        for session in old.values { await session.rejectChangesAfterCancellation() }
+        await old[.remote]?.gateLanguageChange(entered: entered, release: release)
+        let changing = Task { await recorder.chooseLanguage(.korean) }
+        await entered.wait()
+        await recorder.stop()
+        await recorder.start()
+        XCTAssertEqual(recorder.state, .recording)
+        XCTAssertNil(recorder.transcriptionWarning)
+        await release.open()
+        await changing.value
+        XCTAssertNil(recorder.transcriptionWarning)
+        XCTAssertEqual(recorder.language, .english)
+        XCTAssertEqual(RecordingPreferences.language(), .english)
+        await recorder.stop()
+        XCTAssertEqual(recorder.state, .idle)
     }
 
     func test_bothCapturesFail_releasesPreparedSessions() async {
@@ -217,11 +347,10 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
         await timeout.open()
         await fulfillment(of: [returned], timeout: 1)
 
-        // 실패하더라도 가짜 작업은 풀어 줘 테스트 프로세스에 남기지 않는다.
-        guard recorder.state == .idle else {
+        guard case .failed = recorder.state else {
             await harness.provider.releaseCleanup()
             await stopping.value
-            return
+            return XCTFail("An incomplete shutdown must be reported, not silently treated as idle")
         }
         XCTAssertTrue(try markdown(firstDirectory).contains("pending at timeout"))
         XCTAssertTrue(try jsonl(firstDirectory).contains("pending at timeout"))
@@ -282,6 +411,7 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
 private final class RecordingHarness {
     let root: URL
     let provider = StubSpeechProvider()
+    let qwenProvider = StubSpeechProvider()
     var captures: [Speaker: [StubCapture]] = [:]
     var failingSources: Set<Speaker> = []
     var now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -291,10 +421,12 @@ private final class RecordingHarness {
     init(root: URL) { self.root = root }
 
     func makeRecorder(
-        timeout: (@Sendable () async throws -> Void)? = nil
+        timeout: (@Sendable () async throws -> Void)? = nil,
+        models: any SpeechModelInstalling = InstalledModels()
     ) -> MeetingRecorder {
         var environment = RecordingEnvironment()
         environment.speech = provider
+        environment.qwen = qwenProvider
         environment.makeCapture = { [self] speaker, _, _, _ in
             await beforeCapture?(speaker)
             let capture = StubCapture(failsToStart: failingSources.contains(speaker))
@@ -310,7 +442,7 @@ private final class RecordingHarness {
         environment.now = { [self] in now }
         if let timeout { environment.finalizationTimeout = timeout }
         return MeetingRecorder(
-            modelManager: SpeechModelManager(installer: InstalledModels()),
+            modelManager: SpeechModelManager(installer: models),
             environment: environment
         )
     }
@@ -318,6 +450,16 @@ private final class RecordingHarness {
 
 private struct InstalledModels: SpeechModelInstalling {
     func installedLocaleIdentifiers() async -> [String] { ["en-US", "ko-KR"] }
+    func install(_ language: SpeechModelLanguage) async throws {}
+}
+
+private struct MissingModels: SpeechModelInstalling {
+    func installedLocaleIdentifiers() async -> [String] { [] }
+    func install(_ language: SpeechModelLanguage) async throws {}
+}
+
+private struct EnglishOnlyModels: SpeechModelInstalling {
+    func installedLocaleIdentifiers() async -> [String] { ["en-US"] }
     func install(_ language: SpeechModelLanguage) async throws {}
 }
 
@@ -330,6 +472,8 @@ private final class StubSpeechProvider: SpeechSessionProviding {
     let finishStarted = AsyncTestGate()
     let finishRelease = AsyncTestGate()
     let cancelRelease = AsyncTestGate()
+    let switchStarted = AsyncTestGate()
+    var switchRelease: AsyncTestGate?
 
     func prepare(language: TranscriptionLanguage) async throws -> PreparedSpeechSessions {
         prepareCount += 1
@@ -350,6 +494,8 @@ private final class StubSpeechProvider: SpeechSessionProviding {
     }
 
     func installedLocales(for language: TranscriptionLanguage) async throws -> [Locale] {
+        await switchStarted.open()
+        await switchRelease?.wait()
         if rejectSwitch { throw MeetingRecorder.RecorderError.languageModelNotInstalled(language) }
         return language.locales
     }
@@ -364,10 +510,13 @@ private actor StubTranscription: Transcribing {
     private let stream: AsyncStream<TranscriptSegment>
     private let continuation: AsyncStream<TranscriptSegment>.Continuation
     private let finishStarted: AsyncTestGate
-    private let finishRelease: AsyncTestGate?
+    private var finishRelease: AsyncTestGate?
     private let cancelRelease: AsyncTestGate?
     private(set) var localeChanges: [[String]] = []
     private(set) var cancelCount = 0
+    private var rejectsLanguageChange = false
+    private var rejectsCancelledChanges = false
+    private var languageChangeGate: (AsyncTestGate, AsyncTestGate)?
 
     init(finishStarted: AsyncTestGate, finishRelease: AsyncTestGate?, cancelRelease: AsyncTestGate?) {
         (stream, continuation) = AsyncStream.makeStream()
@@ -377,8 +526,15 @@ private actor StubTranscription: Transcribing {
     }
 
     func setLocales(_ locales: [Locale]) async throws {
+        if let gate = languageChangeGate { await gate.0.open(); await gate.1.wait() }
+        if rejectsCancelledChanges && cancelCount > 0 { throw CancellationError() }
+        if rejectsLanguageChange { throw QwenFileTranscriber.RuntimeError.message("stub language failure") }
         localeChanges.append(locales.map(\.identifier))
     }
+    func failLanguageChanges() { rejectsLanguageChange = true }
+    func blockFinish(on gate: AsyncTestGate) { finishRelease = gate }
+    func rejectChangesAfterCancellation() { rejectsCancelledChanges = true }
+    func gateLanguageChange(entered: AsyncTestGate, release: AsyncTestGate) { languageChangeGate = (entered, release) }
 
     func segments() async -> AsyncStream<TranscriptSegment> { stream }
     func emit(_ segment: TranscriptSegment) { continuation.yield(segment) }

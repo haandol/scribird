@@ -1,6 +1,12 @@
 import Darwin
 import Foundation
 
+struct TranscriptStoreIO: Sendable {
+    var write: @Sendable (FileHandle, Data) throws -> Void = { try $0.write(contentsOf: $1) }
+    var synchronize: @Sendable (FileHandle) throws -> Void = { try $0.synchronize() }
+    var writeMarkdown: @Sendable (String, URL) throws -> Void = { try $0.write(to: $1, atomically: true, encoding: .utf8) }
+}
+
 /// 확정된 세그먼트를 디스크에 즉시 append 한다.
 ///
 /// 회의는 길고 앱은 죽을 수 있다. 메모리에 모아 두고 종료 시 한 번에 쓰는 방식은
@@ -13,12 +19,16 @@ actor TranscriptStore {
     private var handle: FileHandle?
     private let encoder = JSONEncoder()
     private var segments: [TranscriptSegment.Record] = []
+    private let io: TranscriptStoreIO
+    private(set) var storageError: (any Error)?
 
     /// - Parameters:
     ///   - startedAt: 세션 시작 시각. 디렉터리 이름과 회의록 헤더에 쓴다.
     ///   - root: 세션 디렉터리를 만들 저장 루트. 사용자가 고른 폴더일 수 있으므로 호출자가
     ///     정해서 넘긴다 — 이 타입이 직접 계산하면 되돌림 판정이 두 곳에 생긴다.
-    init(startedAt: Date, root: URL) throws {
+    init(startedAt: Date, root: URL, engine: FileTranscriptionEngine? = nil,
+         io: TranscriptStoreIO = TranscriptStoreIO()) throws {
+        self.io = io
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -43,6 +53,12 @@ actor TranscriptStore {
         }
         handle = try FileHandle(forWritingTo: jsonlURL)
         self.startedAt = startedAt
+        if let engine {
+            let metadata = ["engine": engine.rawValue, "model": engine.modelIdentifier,
+                            "timestampGranularity": engine.timestampGranularity]
+            try JSONEncoder().encode(metadata).write(to: sessionDirectory.appending(path: "transcription.json"),
+                                                    options: .atomic)
+        }
     }
 
     private let startedAt: Date
@@ -53,7 +69,8 @@ actor TranscriptStore {
     /// 알 수 없다. 호출 순서가 어긋나면 이 값이 0을 넘으므로 테스트가 그것을 잡는다.
     private(set) var droppedAfterFinalize = 0
 
-    func append(_ segment: TranscriptSegment) {
+    /// Returns success only after append and synchronization, so callers cannot acknowledge unsaved text.
+    func append(_ segment: TranscriptSegment) throws {
         guard segment.isFinal else { return }
         let record = segment.record
 
@@ -61,32 +78,33 @@ actor TranscriptStore {
         // 도착한 발화는 두 형식에서 함께 빠진다 — 조용히 넘기지 않고 센다.
         guard handle != nil else {
             droppedAfterFinalize += 1
-            return
+            throw CocoaError(.fileWriteUnknown)
         }
-
-        segments.append(record)
-
-        guard let handle, var data = try? encoder.encode(record) else { return }
-        data.append(0x0A)  // newline
-        try? handle.write(contentsOf: data)
-        // 앱 크래시에는 write(2) 자체로 이미 안전하다 — FileHandle.write는 버퍼링
-        // 없이 커널로 넘기므로 프로세스가 죽어도 페이지 캐시에 남는다. 이 fsync는
-        // 그보다 위인 OS 패닉·전원 손실을 대비한다. 회의록은 다시 만들 수 없으므로
-        // 발화당 한 번의 동기화 비용을 받아들인다.
-        try? handle.synchronize()
+        if let storageError { throw storageError }
+        do {
+            var data = try encoder.encode(record)
+            data.append(0x0A)
+            try io.write(handle!, data)
+            try io.synchronize(handle!)
+            segments.append(record)
+        } catch {
+            storageError = error
+            throw error
+        }
     }
 
-    /// 세션을 닫고 사람이 읽을 Markdown 회의록을 함께 남긴다.
-    ///
-    /// - Parameter audioFiles: 함께 저장된 회의 음성 경로.
-    func finalize(audioFiles: [URL]) -> URL {
-        try? handle?.close()
+    /// Preserves successful JSONL records and reports any append, close, or Markdown failure to the recorder.
+    func finalize(audioFiles: [URL]) throws -> URL {
+        do { try handle?.close() }
+        catch { storageError = storageError ?? error }
         handle = nil
         let markdownURL = sessionDirectory.appending(path: "transcript.md")
-        try? TranscriptMarkdown.render(
-            startedAt: startedAt, segments: segments, audioFiles: audioFiles
-        )
-            .write(to: markdownURL, atomically: true, encoding: .utf8)
+        do {
+            try io.writeMarkdown(TranscriptMarkdown.render(
+                startedAt: startedAt, segments: segments, audioFiles: audioFiles
+            ), markdownURL)
+        } catch { storageError = storageError ?? error }
+        if let storageError { throw storageError }
         return sessionDirectory
     }
 

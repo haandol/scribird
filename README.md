@@ -21,7 +21,7 @@ You can also [transcribe an audio file or the audio from an MP4/MOV video](mcp/f
 from **Transcribe File** in the app, the command line, or the local
 `transcribe_audio` MCP tool. File imports support English or Korean and save timed
 JSONL and Markdown transcripts; imported speakers are marked `unknown`. Choose
-**SpeechAnalyzer** or **Qwen3 ASR** for file imports. Qwen3 uses
+**SpeechAnalyzer** or **Qwen3 ASR** for live recording and file imports. Qwen3 uses
 [Alkd/Qwen3-ASR-1.7B-MLX-8bit](https://huggingface.co/Alkd/Qwen3-ASR-1.7B-MLX-8bit)
 on Apple Silicon and downloads its runtime and model on first use.
 
@@ -82,7 +82,7 @@ Live recording requires the English Speech model. If it is missing, macOS downlo
 when Scribird starts. Korean is optional and can be installed from settings or through the MCP tool
 `install_speech_model`. Qwen3 file
 transcription uses its own model and additionally requires Apple Silicon and `uv`;
-see [Local Qwen3 ASR](#local-qwen3-asr-for-audio-files).
+see [Local Qwen3 ASR](#local-qwen3-asr).
 
 ## Installation
 
@@ -200,7 +200,21 @@ need browser, keyboard or mouse automation. After a timeout, read `get_app_statu
 before repeating a change: the app may still finish the original operation. The
 [tool guide](mcp/README.md) documents each input, result and restriction.
 
-### Local Qwen3 ASR for audio files
+<a id="local-qwen3-asr-for-audio-files"></a>
+
+### Local Qwen3 ASR
+
+For live meetings, open **Settings → Recording → Transcription engine** and choose
+**Qwen3 ASR (MLX 8-bit)**. The selection is saved and applies to the next recording;
+finish the current recording before switching engines. English, Korean and Korean + English
+are available independently of Apple Speech model installation. Initial setup finishes before
+capture begins. Results arrive in chunks, with additional inference delay, and retain the
+microphone/remote speaker labels. Each source has an independent local worker.
+
+Live sessions save the engine, model and timestamp precision in `transcription.json`.
+Qwen3 transcript records also identify chunk timing; those boundaries are not exact utterance
+or word times. Language changes and new-session actions keep capture running. Unfinished
+processing or input overflow is reported, and already saved results and audio are retained.
 
 ASR means automatic speech recognition: converting speech into text. Click
 **Transcribe File** in the transcript window, select an MP3, M4A, WAV, AIFF, CAF,
@@ -258,7 +272,7 @@ The same engine is available through the **`transcribe_audio` MCP tool**. After
 Each file import saves `transcript.jsonl`, `transcript.md` and `result.json` in a new
 `import-<UUID>` folder. Imported speakers are `unknown`; file transcription does
 not identify individual speakers. The original audio is unchanged. Engine selection
-here applies to file imports; live meeting recording continues to use SpeechAnalyzer.
+here applies to file imports and does not change the live engine selected in settings.
 See the [full file transcription guide](mcp/file-transcription.md) for output locations, cancellation,
 timeouts and runtime overrides.
 
@@ -351,7 +365,7 @@ launch. Korean is downloaded only after an install action in settings or an expl
 audio, transcripts, usage counts, or a device identifier.
 
 Starting a file import with Qwen3 may download its Python/MLX runtime and model from
-package registries and Hugging Face. [First-use setup](#local-qwen3-asr-for-audio-files)
+package registries and Hugging Face. [First-use setup](#local-qwen3-asr)
 is initiated by the user; subsequent runs reuse local files. The worker disables
 Hugging Face telemetry and never uploads the input audio or transcript.
 

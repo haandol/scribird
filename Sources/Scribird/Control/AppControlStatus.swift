@@ -18,6 +18,7 @@ extension AppControl {
             "executable": .optional(Bundle.main.executablePath),
             "commands": .strings(Self.commands), "state": .string(stateName),
             "pendingCommand": .optional(pendingCommand), "language": .string(recorder.language.rawValue),
+            "engine": .string(recorder.engine.rawValue),
             "availableLanguages": .strings(recorder.availableLanguages.map(\.rawValue)),
             "microphoneMuted": .bool(recorder.microphoneMuted),
             "activeSources": .strings(recorder.activeSources.map(\.rawValue).sorted()),
@@ -28,6 +29,8 @@ extension AppControl {
             "warnings": .strings([
                 recorder.sourceWarning, recorder.modelRetentionWarning, recorder.languageSwitchWarning,
                 recorder.rootFallbackWarning, connectionError,
+                recorder.transcriptionWarning,
+                recorder.inputDeliveryWarning,
             ].compactMap { $0 }),
             "sources": .array(Speaker.allCases.map { speaker in
                 let level = recorder.inputLevel(for: speaker)

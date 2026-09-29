@@ -54,6 +54,13 @@ content to the configured MCP client; Scribird itself does not upload that conte
 Session-folder allocation must not reuse an existing folder, including two sessions
 started within the same second. Keep these contracts in `mcp/README.md`.
 
+The settings window selects the live engine, defaulting to SpeechAnalyzer. Qwen3 live
+recording uses the same pinned model and app-managed runtime as file imports, with
+independent source workers. Engine selection persists and is locked during preparation,
+recording and stopping; language changes and session boundaries keep capture running.
+Apple Speech model availability must not block Qwen3. Persist engine/model/chunk timing
+metadata and surface input loss or incomplete processing. File-engine selection stays independent.
+
 Bundle metadata, entitlements, and the editable app icon are in `Resources/`. Generated
 artifacts belong in `.build/` and `build/`; do not edit or commit them as source.
 

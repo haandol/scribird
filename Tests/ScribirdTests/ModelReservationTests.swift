@@ -244,6 +244,17 @@ final class ModelReservationTests: XCTestCase {
                       "그 시점의 예약 목록이 빠졌다 — 원인을 사후에 좁힐 수 없다")
     }
 
+    func test_nonfatalReservationWarning_preservesCompleteDiagnosticContext() {
+        let warning = MeetingRecorder.retentionWarning(
+            for: [(Locale(identifier: "ko-KR"), "Asset locale not supported.")],
+            requested: [Locale(identifier: "ko-KR"), Locale(identifier: "en-US")],
+            reserved: [Locale(identifier: "en-US"), Locale(identifier: "fr-FR")]
+        )
+        for detail in ["Asset locale not supported.", "ko-KR", "en-US", "fr-FR"] {
+            XCTAssertTrue(warning.contains(detail), detail)
+        }
+    }
+
     /// 예약이 하나도 없을 때 문구가 "없음"이라고 말해야 한다.
     ///
     /// 관측된 오진의 상태가 정확히 이것이었다 — 예약 0개인데 한도 초과라고 보고됐다.

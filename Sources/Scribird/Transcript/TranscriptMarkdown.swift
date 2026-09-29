@@ -14,6 +14,11 @@ enum TranscriptMarkdown {
     ) -> String {
         let header = startedAt.formatted(date: .long, time: .shortened)
         var lines = ["# Meeting Transcript — \(header)", ""]
+        if let qwen = segments.first(where: { $0.engine == "qwen3" }) {
+            lines.append("Transcription engine: Qwen3 ASR — \(qwen.model ?? "unknown model")")
+            lines.append("Timestamps describe input audio chunks, not exact utterance or word boundaries.")
+            lines.append("")
+        }
 
         if !audioFiles.isEmpty {
             lines.append("Meeting audio: " + audioFiles.map { url in

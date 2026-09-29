@@ -51,7 +51,7 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_sessionOutput_isConfinedToTemporaryRoot() async throws {
         let store = try makeStore()
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
         XCTAssertEqual(directory.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL,
                        sandbox.standardizedFileURL)
     }
@@ -59,16 +59,16 @@ final class TranscriptStoreTests: XCTestCase {
     func test_sameSecondSessions_doNotOverwriteExistingTranscriptOrAudio() async throws {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let first = try makeStore(startedAt: date)
-        await first.append(segment(.me, "previous session", 0, 1))
-        let firstDirectory = await first.finalize(audioFiles: [])
+        try await first.append(segment(.me, "previous session", 0, 1))
+        let firstDirectory = try await first.finalize(audioFiles: [])
         let originalJSONL = try Data(contentsOf: firstDirectory.appending(path: "transcript.jsonl"))
         let originalMarkdown = try Data(contentsOf: firstDirectory.appending(path: "transcript.md"))
         let audio = firstDirectory.appending(path: "meeting.m4a")
         try Data("existing audio".utf8).write(to: audio)
 
         let second = try makeStore(startedAt: date)
-        await second.append(segment(.remote, "next session", 0, 1))
-        let secondDirectory = await second.finalize(audioFiles: [])
+        try await second.append(segment(.remote, "next session", 0, 1))
+        let secondDirectory = try await second.finalize(audioFiles: [])
 
         XCTAssertNotEqual(firstDirectory, secondDirectory)
         XCTAssertEqual(try Data(contentsOf: firstDirectory.appending(path: "transcript.jsonl")), originalJSONL)
@@ -80,7 +80,7 @@ final class TranscriptStoreTests: XCTestCase {
     func test_finalSegment_isOnDiskBeforeSessionEnds() async throws {
         let store = try makeStore()
 
-        await store.append(segment(.me, "첫 발화입니다.", 0, 1.5))
+        try await store.append(segment(.me, "첫 발화입니다.", 0, 1.5))
 
         // finalize를 부르지 않은 상태에서 이미 읽혀야 한다 — 크래시 내구성의 핵심.
         let lines = try jsonlLines(await store.sessionDirectory)
@@ -91,9 +91,9 @@ final class TranscriptStoreTests: XCTestCase {
     func test_multipleSegments_appendInOrderOneLineEach() async throws {
         let store = try makeStore()
 
-        await store.append(segment(.me, "하나", 0, 1))
-        await store.append(segment(.remote, "둘", 1, 2))
-        await store.append(segment(.me, "셋", 2, 3))
+        try await store.append(segment(.me, "하나", 0, 1))
+        try await store.append(segment(.remote, "둘", 1, 2))
+        try await store.append(segment(.me, "셋", 2, 3))
 
         let lines = try jsonlLines(await store.sessionDirectory)
         XCTAssertEqual(lines.map { $0["text"] as? String }, ["하나", "둘", "셋"])
@@ -102,7 +102,7 @@ final class TranscriptStoreTests: XCTestCase {
     func test_volatileSegment_isNotWritten() async throws {
         let store = try makeStore()
 
-        await store.append(segment(.me, "말하는 중", 0, 1, isFinal: false))
+        try await store.append(segment(.me, "말하는 중", 0, 1, isFinal: false))
 
         let lines = try jsonlLines(await store.sessionDirectory)
         XCTAssertTrue(lines.isEmpty, "잠정 결과가 저장되면 같은 말이 중복으로 남는다")
@@ -111,7 +111,7 @@ final class TranscriptStoreTests: XCTestCase {
     func test_record_carriesSpeakerAndTiming() async throws {
         let store = try makeStore()
 
-        await store.append(segment(.remote, "상대방 발언", 2.5, 4.0))
+        try await store.append(segment(.remote, "상대방 발언", 2.5, 4.0))
 
         let lines = try jsonlLines(await store.sessionDirectory)
         XCTAssertEqual(lines[0]["speaker"] as? String, "remote")
@@ -127,7 +127,7 @@ final class TranscriptStoreTests: XCTestCase {
     /// 캐시 덕에 flush 여부와 무관하게 보이므로, 별도 프로세스로 읽어 확인한다.
     func test_appendedSegments_areVisibleToAnotherProcessBeforeFinalize() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "크래시 전에 남아야 한다", 0, 1.5))
+        try await store.append(segment(.me, "크래시 전에 남아야 한다", 0, 1.5))
         let path = await store.sessionDirectory.appending(path: "transcript.jsonl").path
 
         // 외부 프로세스로 읽는다 — 우리 프로세스의 버퍼를 거치지 않는다.
@@ -170,9 +170,9 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_finalize_writesMarkdownAlongsideJSONL() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "안녕하세요.", 0, 1))
+        try await store.append(segment(.me, "안녕하세요.", 0, 1))
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: directory.appending(path: "transcript.md").path),
@@ -182,10 +182,10 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_markdown_groupsConsecutiveSameSpeakerIntoOneBlock() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "첫 문장.", 0, 1))
-        await store.append(segment(.me, "이어지는 문장.", 1, 2))
+        try await store.append(segment(.me, "첫 문장.", 0, 1))
+        try await store.append(segment(.me, "이어지는 문장.", 1, 2))
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
@@ -202,10 +202,10 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_markdown_splitsWhenSpeakerChanges() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "제 말입니다.", 0, 1))
-        await store.append(segment(.remote, "제 답입니다.", 1, 2))
+        try await store.append(segment(.me, "제 말입니다.", 0, 1))
+        try await store.append(segment(.remote, "제 답입니다.", 1, 2))
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
@@ -215,10 +215,10 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_markdown_splitsWhenLanguageChanges() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "한국어 발화.", 0, 1, locale: "ko-KR"))
-        await store.append(segment(.me, "English utterance.", 1, 2, locale: "en-US"))
+        try await store.append(segment(.me, "한국어 발화.", 0, 1, locale: "ko-KR"))
+        try await store.append(segment(.me, "English utterance.", 1, 2, locale: "en-US"))
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
@@ -235,10 +235,10 @@ final class TranscriptStoreTests: XCTestCase {
     func test_markdown_ordersBlocksByTime() async throws {
         let store = try makeStore()
         // 뒤늦게 도착한 발화를 나중에 append 한다.
-        await store.append(segment(.me, "나중 발화", 10, 11))
-        await store.append(segment(.remote, "이른 발화", 1, 2))
+        try await store.append(segment(.me, "나중 발화", 10, 11))
+        try await store.append(segment(.remote, "이른 발화", 1, 2))
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
@@ -249,10 +249,10 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_markdown_linksSavedAudioFiles() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "발화", 0, 1))
+        try await store.append(segment(.me, "발화", 0, 1))
         let audio = await store.sessionDirectory.appending(path: "meeting.m4a")
 
-        let directory = await store.finalize(audioFiles: [audio])
+        let directory = try await store.finalize(audioFiles: [audio])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 
@@ -262,7 +262,7 @@ final class TranscriptStoreTests: XCTestCase {
     func test_markdown_withNoSegments_stillProducesFile() async throws {
         let store = try makeStore()
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: directory.appending(path: "transcript.md").path),
@@ -272,10 +272,10 @@ final class TranscriptStoreTests: XCTestCase {
 
     func test_singleLanguageSession_omitsLanguageHeader() async throws {
         let store = try makeStore()
-        await store.append(segment(.me, "한국어만.", 0, 1, locale: "ko-KR"))
-        await store.append(segment(.remote, "역시 한국어.", 1, 2, locale: "ko-KR"))
+        try await store.append(segment(.me, "한국어만.", 0, 1, locale: "ko-KR"))
+        try await store.append(segment(.remote, "역시 한국어.", 1, 2, locale: "ko-KR"))
 
-        let directory = await store.finalize(audioFiles: [])
+        let directory = try await store.finalize(audioFiles: [])
         let markdown = try String(contentsOf: directory.appending(path: "transcript.md"),
                                   encoding: .utf8)
 

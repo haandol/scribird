@@ -94,6 +94,13 @@ that device, including changes that keep the same device UID. Developers should 
 `bash scripts/check-audio-regressions.sh` and the explicit AirPods hardware probe in
 `CONTRIBUTING.md`. Existing damaged recordings are not automatically rewritten.
 
+### Qwen3 is not available in the live recording settings
+
+Open Settings → Recording → Transcription engine. Qwen3 requires Apple Silicon and
+initial runtime/model preparation; installing Apple English or Korean assets is not
+required for this engine. The selector is disabled while preparing, recording or stopping.
+The separate Transcribe File window controls only that file task's engine.
+
 ### Only my own voice is transcribed
 
 The system-audio path is down. In order of likelihood:

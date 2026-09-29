@@ -97,6 +97,9 @@ final class MicrophoneCapture: CaptureSource, @unchecked Sendable {
 
     /// 세션 전체 최대 진폭. 0에 가까우면 권한 거부를 의심한다.
     var peakLevel: Float { pump.peakLevel }
+    var droppedInputDuration: TimeInterval { pump.droppedInputDuration }
+    func useBoundaryCoordinator(_ coordinator: CaptureBoundaryCoordinator) { pump.useBoundaryCoordinator(coordinator) }
+    func boundaryMarker() -> @Sendable () -> Void { { [pump] in pump.markBoundary() } }
 
     func setMuted(_ muted: Bool) {
         pump.setMuted(muted)

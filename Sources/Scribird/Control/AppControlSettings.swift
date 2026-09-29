@@ -42,6 +42,7 @@ extension AppControl {
     func settings() -> ControlValue {
         .object([
             "language": .string(recorder.language.rawValue),
+            "engine": .string(recorder.engine.rawValue),
             "savesAudio": .bool(recorder.savesAudio), "opensFolderOnStop": .bool(recorder.opensFolderOnStop),
             "chosenTranscriptRoot": .optional(recorder.chosenTranscriptRoot?.path),
             "effectiveTranscriptRoot": .optional(recorder.transcriptRootDirectory?.path),

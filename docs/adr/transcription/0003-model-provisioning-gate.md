@@ -4,7 +4,7 @@ Date: 2026-07-30
 
 ## Status
 
-Accepted (2026-08-21)
+Accepted (2026-09-29)
 
 ## Context
 
@@ -36,6 +36,10 @@ Accepted (2026-08-21)
 - 모델 삭제는 운영체제 소유라 앱이 동일한 생명주기 제어를 제공할 수 없다.
 
 ## Decision
+
+이 결정의 모델 설치·예약·녹취 시작 조건은 SpeechAnalyzer에 적용한다. Qwen3는
+[로컬 엔진 선택 계약](./0006-selectable-local-file-asr.md)에 따라 별도로 준비하며,
+Apple Speech 설치 실패가 Qwen3 녹취를 막지 않는다.
 
 English 모델은 앱의 필수 기본 자산으로 둔다. 앱 시작 시 설치 여부를 확인하고 없으면
 macOS Speech 에셋 설치를 자동으로 시작한다. 한국어 모델은 설정 화면에서 사용자가 명시적으로

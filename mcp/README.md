@@ -50,7 +50,7 @@ and the newly built bundle reopened before live controls are available.
 | Tool | Behavior |
 |---|---|
 | `launch_app` | Launch the configured bundle in the background; does not record. |
-| `get_app_status` | Read actual recording language/state, sources, meters, warnings, paths, pending command and update status. |
+| `get_app_status` | Read actual recording engine/language/state, sources, meters, input-loss warnings, paths, pending command and update status. |
 | `show_window` | Show `transcript`, `settings` or `file_transcription`; this explicit action may focus Scribird. |
 | `dismiss_error` | Clear the failed recording state without deleting output or retrying. |
 
@@ -73,7 +73,7 @@ Transcript-reading tools return content to the configured MCP client; that clien
 own handling of the text is outside Scribird. `install_speech_model` explicitly asks
 macOS to download an English/Korean model. Launch may install mandatory English.
 `check_for_updates` requests one GitHub lookup; it never downloads or installs a
-release. Qwen file imports may download their runtime/model on first use.
+release. User-selected Qwen live recording and file imports may download their runtime/model on first use.
 
 macOS permission grants, app quitting/restarting, release installation and Finder
 file operations remain outside the control tools. Summary generation and arbitrary
@@ -124,7 +124,7 @@ for decibels; recording state alone is not proof that both sources have audio.
 
 | Tool | Inputs and restrictions |
 |---|---|
-| `get_settings` | Read effective settings, selected/effective output roots, lock state and shortcuts. |
+| `get_settings` | Read the live engine and effective settings, selected/effective output roots, lock state and shortcuts. |
 | `set_recording_preferences` | Optional `saves_audio`, `opens_folder_on_stop`. Audio retention changes only while idle/failed; folder opening can change during recording. Invalid combinations change neither value. |
 | `set_transcript_root` | Absolute `path` (or `~`), `null` restores default. Applies to future recordings, only while idle/failed; existing files never move. |
 | `set_interface_language` / `set_keyboard_shortcut` | Interface: `english` or `korean`. Shortcut: `slot`, physical `key_code`, `modifiers`, or `reset=true`. |
