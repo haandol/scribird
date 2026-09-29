@@ -304,8 +304,8 @@ capture reconnects without splitting the session. Finally, unplug the pinned dev
 must fall back to the system default with a warning, and re-plugging it must return to the
 pinned choice — the selection is kept, not erased.
 
-**Global hotkey.** Press the hotkey from another frontmost app, click that app, and confirm
-the transcript window stays visible. Then set a combination already taken by another app and
+**Global hotkey.** With **Keep transcript window on top** enabled, press the hotkey from another
+frontmost app, click that app, and confirm the transcript window stays visible. Then set a combination already taken by another app and
 confirm the settings footer reports the failure instead of failing silently.
 
 **Storage failure isolation.** The audio regression harness includes an invalid owned output
@@ -313,13 +313,15 @@ parent, rotation into a healthy directory, both live engines' boundaries, and si
 and transcript failure. It verifies playable later audio, retained transcript text and warnings,
 and successful stop for an audio-only failure. Do not test this by filling a real disk.
 
-**Window layering and close.** With the transcript window up, stop a recording and confirm the
-session folder appears **in front of** it — the window floats above other apps, so a regression
-here shows up as the folder opening behind it, which the automated tests can't see. Click the
-transcript window and confirm it returns above other apps. Then press `⌘W` with the transcript
-window in front and confirm it goes away while the recording continues (start one first). The
-interception lives on the transcript window only, so also check that recording `⌘W` into a
-shortcut field in settings still captures it as a combination.
+**Window layering and close.** In Settings → General, turn **Keep transcript window on top**
+off, recall the transcript, and put another app in front: that app must cover it. Relaunch and
+confirm the choice remains off. Turn it on and recall the transcript to confirm it floats.
+Open settings, Transcribe File, and the save folder in turn: each must appear in front of the
+transcript, and the two utility windows must yield to other apps. Turning the option on while
+settings is active must not cover settings; recall the transcript to restore the selected level.
+Repeat during recording and confirm capture and saved output continue. Closing and reopening
+Transcribe File must preserve its running job or result. Press `⌘W` in the transcript and confirm
+it hides without stopping recording; the settings shortcut field must still capture `⌘W`.
 
 **Settings.** Open the settings window with its shortcut, confirm the transcript window behind
 it stays visible and recording continues, and that the rows locked for the duration of a

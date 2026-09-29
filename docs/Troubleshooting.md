@@ -368,6 +368,13 @@ with:
 **Do not attach meeting audio or transcripts.** Describe the symptom instead — nobody needs
 your meeting to diagnose a permission problem.
 
+### Scribird stays above other apps
+
+In Settings → General, turn off **Keep transcript window on top**. The choice persists across
+launches. Settings and Transcribe File use normal window order. With the option on, opening
+either window or a save folder temporarily lowers the transcript; recalling the transcript
+restores the selected level. Changing window order does not stop recording.
+
 ### Meeting audio could not be saved
 
 An audio-storage warning means the audio file may be missing or incomplete. Successfully

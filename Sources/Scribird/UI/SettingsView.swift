@@ -18,6 +18,7 @@ struct SettingsView: View {
     let microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings
     let updateChecker: UpdateChecker
     let languageSettings: AppLanguageSettings
+    let windowSettings: TranscriptWindowSettings
 
     /// 저장 위치를 바꾸지 못한 사유. 성공하면 nil이다.
     ///
@@ -56,6 +57,7 @@ struct SettingsView: View {
     /// macOS 앱의 설정 창이 그 탭에서 열리는 것이 관례다.
     @State private var pane: Pane
 
+    /// Shares live preferences across the settings surface; choosing a tab never replaces recording state.
     init(
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
@@ -63,7 +65,8 @@ struct SettingsView: View {
         microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings,
         updateChecker: UpdateChecker,
         languageSettings: AppLanguageSettings,
-        initialPane: Pane = .general
+        initialPane: Pane = .general,
+        windowSettings: TranscriptWindowSettings = .shared
     ) {
         self.recorder = recorder
         self.hotKeySettings = hotKeySettings
@@ -71,6 +74,7 @@ struct SettingsView: View {
         self.microphoneMuteHotKeySettings = microphoneMuteHotKeySettings
         self.updateChecker = updateChecker
         self.languageSettings = languageSettings
+        self.windowSettings = windowSettings
         _pane = State(initialValue: initialPane)
     }
 
@@ -116,6 +120,17 @@ struct SettingsView: View {
                          "The interface uses this language. Speaker names in transcript files are always saved in English.")
                     : tr("시스템 언어를 따르고 있습니다. 위에서 고르면 시스템 언어가 바뀌어도 그 선택을 유지합니다.",
                          "Following the system language. Pick one above to keep it even when the system language changes."))
+                    .captionStyle(.secondary)
+            }
+
+            Section(tr("창 표시", "Window behavior")) {
+                Toggle(tr("전사 창 항상 위에 표시", "Keep transcript window on top"), isOn: Binding(
+                    get: { windowSettings.keepsOnTop },
+                    set: { windowSettings.update(keepsOnTop: $0) }
+                ))
+                .accessibilityIdentifier("transcriptWindowAlwaysOnTop")
+                Text(tr("끄면 다른 앱과 같은 창 순서를 따릅니다. 설정과 파일 전사 창은 항상 일반 창으로 열립니다.",
+                        "Turn off to use normal window order. Settings and Transcribe File always open as ordinary windows."))
                     .captionStyle(.secondary)
             }
 

@@ -219,6 +219,11 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   reason is to break on `objc_exception_throw`. The settings window is therefore a fixed size and
   its tabs scroll inside it — an empty strip on a short tab is better than an item that can't be
   reached, and this window has no resize handle to recover with.
+- **Only the live transcript can stay on top, and its preference is persistent.** The default
+  is on. Settings and file-transcription windows use the normal level and make the transcript
+  yield before they open or become key. Recalling the transcript restores the selected level,
+  never an unconditional floating level. A preference change while yielding must not cover the
+  utility window. Window order never changes recording or file jobs.
 - **SwiftUI's `.keyboardShortcut` does nothing in this app.** It is dispatched through the
   menu system, and a `MenuBarExtra`-only app has no main menu (measured: `NSApp.mainMenu` is
   nil, so a shortcut attached to a button never fires even while its window is key). Intercept
@@ -355,8 +360,8 @@ Carbon event target nor a live capture rotation exists under `swift test`:
   directories must exist, each with a playable `.m4a` and a `transcript.md` whose
   timecodes start near `00:00:00` — a second meeting starting at `01:02:05` means the
   time rebase was lost.
-- Press the hotkey from another frontmost app, click that app, and confirm the transcript
-  window stays visible. Then set a combination already taken by another app and confirm
+- With **Keep transcript window on top** enabled, press the hotkey from another frontmost app,
+  click that app, and confirm the transcript window stays visible. Then set a combination already taken by another app and confirm
   the footer reports the failure instead of failing silently.
 - While recording with Scribird focused, press `⌘Y` and confirm only the microphone becomes
   muted while the system meter continues. Press it again to unmute, then put another app in

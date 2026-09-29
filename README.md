@@ -292,6 +292,11 @@ by what the setting is *about* — **General** (interface language, both hotkeys
 (which microphone and which output device to capture). The transcript window keeps only what you
 look at during a meeting.
 
+**Window order.** Settings → General → **Keep transcript window on top** controls whether the
+live transcript stays above other apps. The default is on; your choice persists. Settings and
+Transcribe File use ordinary window order. Opening either window or a save folder lets it
+appear in front of the transcript; recalling the transcript restores your chosen setting.
+
 **The meeting language is in both places on purpose.** You set it before a meeting in settings,
 but you find out it was wrong *during* one — a missing utterance is the signal — so the transcript
 window carries the same picker. Changing it there does not interrupt anything: capture keeps
@@ -549,6 +554,7 @@ defaults read com.scribird.app
 
 | Key | Setting | Default |
 |---|---|---|
+| `transcriptWindowAlwaysOnTop` | Keep transcript window on top | `true` |
 | `interfaceLanguage` | Interface language | unset (follow system language) |
 | `transcriptionLanguage` | Meeting language | `english` |
 | `savesOriginalAudio` | Save original audio | `true` |

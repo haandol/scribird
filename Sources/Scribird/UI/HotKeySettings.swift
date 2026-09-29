@@ -20,10 +20,14 @@ final class HotKeySettings: ShortcutEditing {
 
     private var hotKey: GlobalHotKey?
     private let defaults: UserDefaults
+    private let registerShortcut: ((HotKeyShortcut) throws -> Void)?
 
-    init(shortcut: HotKeyShortcut? = nil, defaults: UserDefaults = .standard) {
+    /// Loads the stored choice; an injectable registration boundary exercises failures without taking system hotkeys.
+    init(shortcut: HotKeyShortcut? = nil, defaults: UserDefaults = .standard,
+         registerShortcut: ((HotKeyShortcut) throws -> Void)? = nil) {
         self.defaults = defaults
         self.shortcut = shortcut ?? .load(from: defaults)
+        self.registerShortcut = registerShortcut
     }
 
     /// 단축키가 눌렸을 때 실행할 동작을 붙이고 등록한다.
@@ -32,10 +36,7 @@ final class HotKeySettings: ShortcutEditing {
         apply(shortcut)
     }
 
-    /// 사용자가 고른 조합으로 바꾼다.
-    ///
-    /// 실패하면 이전 조합으로 되돌린다 — 등록되지 않은 조합을 설정으로 남기면
-    /// 사용자는 단축키가 바뀐 줄 알지만 아무 조합도 동작하지 않는다.
+    /// Restores the previous choice on registration failure without hiding why the requested change failed.
     func update(to newShortcut: HotKeyShortcut) {
         if let error = newShortcut.validationError {
             registrationError = error
@@ -43,8 +44,9 @@ final class HotKeySettings: ShortcutEditing {
         }
         let previous = shortcut
         apply(newShortcut)
-        if registrationError != nil, newShortcut != previous {
+        if let changeError = registrationError, newShortcut != previous {
             apply(previous)
+            registrationError = [changeError, registrationError].compactMap { $0 }.joined(separator: "\n")
         }
     }
 
@@ -52,9 +54,11 @@ final class HotKeySettings: ShortcutEditing {
         update(to: .default)
     }
 
+    /// Persists only a successfully registered choice and exposes registration errors to the settings UI.
     private func apply(_ candidate: HotKeyShortcut) {
         do {
-            try hotKey?.register(candidate)
+            if let registerShortcut { try registerShortcut(candidate) }
+            else { try hotKey?.register(candidate) }
             shortcut = candidate
             candidate.save(to: defaults)
             registrationError = nil

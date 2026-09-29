@@ -15,14 +15,17 @@ final class SettingsWindow {
     private let microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings
     private let updateChecker: UpdateChecker
     private let languageSettings: AppLanguageSettings
+    private let windowSettings: TranscriptWindowSettings
 
+    /// Shares window ordering without coupling settings lifetime to the recorder.
     init(
         recorder: MeetingRecorder,
         hotKeySettings: HotKeySettings,
         settingsHotKeySettings: SettingsHotKeySettings,
         microphoneMuteHotKeySettings: MicrophoneMuteHotKeySettings,
         updateChecker: UpdateChecker,
-        languageSettings: AppLanguageSettings
+        languageSettings: AppLanguageSettings,
+        windowSettings: TranscriptWindowSettings = .shared
     ) {
         self.recorder = recorder
         self.hotKeySettings = hotKeySettings
@@ -30,9 +33,12 @@ final class SettingsWindow {
         self.microphoneMuteHotKeySettings = microphoneMuteHotKeySettings
         self.updateChecker = updateChecker
         self.languageSettings = languageSettings
+        self.windowSettings = windowSettings
     }
 
+    /// Opens settings at the normal level after lowering the live transcript.
     func show() {
+        windowSettings.yieldFront()
         let window = window ?? makeWindow()
         self.window = window
         // 메뉴바 전용 앱(LSUIElement)은 활성화되지 않으므로 창이 키를 받으려면
@@ -44,8 +50,9 @@ final class SettingsWindow {
         window.orderFrontRegardless()
     }
 
-    private func makeWindow() -> NSWindow {
-        let window = NSWindow(
+    /// Uses a fixed-size ordinary window so settings never cover unrelated apps or enter a sizing loop.
+    func makeWindow() -> NSWindow {
+        let window = UtilityWindow(
             // 뷰가 요구하는 크기와 같게 둔다. 어긋나면 첫 표시에서 내용이 잘리거나 여백이 남는다.
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 380),
             // 크기 조절을 주지 않는다 — 탭이 그 안에서 스크롤한다.
@@ -54,20 +61,8 @@ final class SettingsWindow {
             defer: false
         )
         window.title = tr("Scribird 설정", "Scribird Settings")
-        // 전사 창과 같은 층에 둔다.
-        //
-        // 전사 창은 회의 화면에 가려지지 않으려고 `.floating`이다. 설정 창을 기본 레벨로
-        // 두면 키 윈도우가 되어도 전사 창 뒤에 깔린다 — 레벨이 키 상태보다 우선하기
-        // 때문이다. 실측:
-        //
-        // ```
-        // floating(전사) + normal(설정) → 위: 전사, 설정은 isKey=true인데도 뒤
-        // floating(전사) + floating(설정) → 위: 설정 (나중에 부른 창)
-        // ```
-        //
-        // 같은 층에 두면 마지막에 부른 창이 앞에 오므로, 설정을 열면 설정이 보이고 전사
-        // 창을 다시 부르면 그쪽이 앞에 온다.
-        window.level = .floating
+        window.transcriptSettings = windowSettings
+        window.level = .normal
         // 전체 화면 회의 앱 위에서도 설정을 열 수 있어야 한다. 전사 창과 같은 조건으로
         // 두지 않으면 회의 중에 설정만 다른 공간으로 튄다.
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
@@ -93,7 +88,8 @@ final class SettingsWindow {
                 settingsHotKeySettings: settingsHotKeySettings,
                 microphoneMuteHotKeySettings: microphoneMuteHotKeySettings,
                 updateChecker: updateChecker,
-                languageSettings: languageSettings
+                languageSettings: languageSettings,
+                windowSettings: windowSettings
             )
         )
         window.contentViewController = controller

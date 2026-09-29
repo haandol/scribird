@@ -15,19 +15,23 @@ final class FloatingTranscriptWindow {
     private let settingsHotKey: SettingsHotKeySettings
     private let languageSettings: AppLanguageSettings
     private let openSettings: () -> Void
+    private let windowSettings: TranscriptWindowSettings
 
+    /// Shares the display preference with utility windows while keeping recording lifetime independent.
     init(
         recorder: MeetingRecorder,
         settings: HotKeySettings,
         settingsHotKey: SettingsHotKeySettings,
         languageSettings: AppLanguageSettings,
-        openSettings: @escaping () -> Void
+        openSettings: @escaping () -> Void,
+        windowSettings: TranscriptWindowSettings = .shared
     ) {
         self.recorder = recorder
         self.settings = settings
         self.settingsHotKey = settingsHotKey
         self.languageSettings = languageSettings
         self.openSettings = openSettings
+        self.windowSettings = windowSettings
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
@@ -36,25 +40,19 @@ final class FloatingTranscriptWindow {
         if isVisible { hide() } else { show() }
     }
 
-    /// 앱이 스스로 다른 창을 앞으로 내보낼 때, 이 창을 그 아래로 비켜 준다.
-    ///
-    /// 이 창이 다른 앱 위에 머무는 목적은 **회의 화면에 가려지지 않는 것**이지, 사용자가 방금
-    /// 불러낸 것을 덮는 것이 아니다. 산출물 폴더를 열어 놓고 그 위를 덮으면 열어 준 목적이
-    /// 사라진다.
-    ///
-    /// 실측: 창 레벨을 유지한 채 폴더를 열면 화면 순서가 `[0] 이 창(L3) / [1] Finder(L0)`로,
-    /// 레벨을 일반으로 낮추면 `[0] Finder(L0) / [1] 이 창(L0)`로 뒤바뀐다. Finder를 활성화하는
-    /// 것만으로는 부족하고 — 활성화는 되지만 레벨이 높으면 그대로 가려진다 — 레벨을 내려야 한다.
-    ///
-    /// 되돌리는 시점은 사용자가 이 창을 다시 앞으로 부를 때다. 시간으로 되돌리면 사용자가
-    /// 폴더를 보는 중에 다시 덮을 수 있다.
+    /// Yields to a utility window or folder without changing the user's pinning preference.
+    /// Measured: retaining level 3 left Finder (level 0) behind the transcript even when Finder
+    /// was active. Lowering to level 0 let Finder come first. Only recalling the transcript
+    /// restores its configured level, so it cannot cover the folder again on a timer.
     func yieldFront() {
-        window?.level = .normal
+        windowSettings.yieldFront()
     }
 
+    /// Recalls the existing transcript using the saved pinning choice without restarting recording.
     func show() {
         let window = window ?? makeWindow()
         self.window = window
+        windowSettings.restoreFront()
         // 메뉴바 전용 앱(LSUIElement)은 활성화되지 않으므로 창이 키를 받으려면
         // 명시적으로 앞으로 끌어와야 한다. 스크롤·텍스트 선택이 이것에 의존한다.
         window.makeKeyAndOrderFront(nil)
@@ -65,7 +63,8 @@ final class FloatingTranscriptWindow {
         window?.orderOut(nil)
     }
 
-    private func makeWindow() -> NSWindow {
+    /// Builds an independent transcript surface and binds focus restoration to the user's pinning choice.
+    func makeWindow() -> NSWindow {
         let window = SettingsShortcutWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 540),
             // 닫기·최소화 버튼을 준다 — 자동으로 닫히지 않는 창이므로 사용자가
@@ -75,6 +74,7 @@ final class FloatingTranscriptWindow {
             defer: false
         )
         window.onSettingsShortcut = openSettings
+        window.onBecomeKey = { [windowSettings] in windowSettings.restoreFront() }
         // 조합을 붙잡아 두지 않고 그때그때 물어본다 — 사용자가 설정에서 바꾸면 다음 키 입력부터
         // 바로 반영돼야 한다.
         let hotKey = settingsHotKey
@@ -84,8 +84,7 @@ final class FloatingTranscriptWindow {
         window.title = "Scribird"
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
-        // 회의 화면에 가려지지 않아야 확인용으로 쓸 수 있다.
-        window.level = .floating
+        windowSettings.attach(window)
         // 메뉴바 앱이라 마지막 창을 닫아도 앱이 종료되지 않아야 한다.
         window.isReleasedWhenClosed = false
         // 전체 화면 회의 앱 위에서도 보이게 한다.
@@ -139,20 +138,17 @@ enum WindowCloseShortcut {
 /// 화면 상단 메뉴바가 이 앱의 것으로 바뀐다. Dock에도 뜨지 않는 앱이 상단 메뉴를 점유하는 것은
 /// 사용자가 기대하는 동작이 아니다.
 private final class SettingsShortcutWindow: NSWindow {
+    var onBecomeKey: (() -> Void)?
     var onSettingsShortcut: (() -> Void)?
     /// 어떤 조합을 설정 열기로 볼지. 사용자가 바꿀 수 있으므로 값을 물어서 판정한다.
     var matchesSettingsShortcut: ((NSEvent) -> Bool)?
     /// `⌘W`로 창을 치울 때의 동작.
     var onCloseShortcut: (() -> Void)?
 
-    /// 다시 앞으로 불려 나오면 떠 있는 레벨로 되돌린다.
-    ///
-    /// 산출물 폴더에 앞자리를 넘기려고 레벨을 낮춘 상태에서, 사용자가 이 창을 다시 부르면
-    /// 회의 화면 위에 머무는 성질을 회복해야 한다. 시간으로 되돌리지 않는 이유는 사용자가
-    /// 폴더를 보는 중에 다시 덮어 버리기 때문이다.
+    /// Restores the configured display level when recalled, including an explicit choice to remain normal.
     override func becomeKey() {
         super.becomeKey()
-        if level != .floating { level = .floating }
+        onBecomeKey?()
     }
 
     private func isCloseShortcut(_ event: NSEvent) -> Bool {

@@ -90,6 +90,26 @@ final class RecordingPreferencesTests: XCTestCase {
                       "다시 켠 원본 저장이 복원되지 않았다")
     }
 
+    /// Invalid stored values must not silently turn off default-on output options.
+    func test_invalidOutputBooleans_restoreTheirDefaults() {
+        for value: Any in ["corrupt", ["unexpected"], Data([1, 2]), 2] {
+            defaults.set(value, forKey: "savesOriginalAudio")
+            defaults.set(value, forKey: "opensSessionFolderOnStop")
+            XCTAssertTrue(RecordingPreferences.savesAudio(from: defaults))
+            XCTAssertTrue(RecordingPreferences.opensFolderOnStop(from: defaults))
+        }
+    }
+
+    /// Retains interpretable legacy opt-outs, including values written with the defaults command.
+    func test_legacyFalseOutputValues_remainOff() {
+        for value: Any in [false, 0, "false", "NO", "0"] {
+            defaults.set(value, forKey: "savesOriginalAudio")
+            defaults.set(value, forKey: "opensSessionFolderOnStop")
+            XCTAssertFalse(RecordingPreferences.savesAudio(from: defaults))
+            XCTAssertFalse(RecordingPreferences.opensFolderOnStop(from: defaults))
+        }
+    }
+
     // MARK: - 종료 시 저장 폴더 열기
 
     /// 아무것도 정하지 않은 사용자도 회의가 끝나면 산출물을 볼 수 있어야 한다.

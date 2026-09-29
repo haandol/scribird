@@ -24,19 +24,27 @@ struct HotKeyShortcut: Equatable, Sendable {
     /// 수정자가 없거나 Shift만 있는 조합은 일반 타이핑을 가로채므로 거부한다.
     var isValid: Bool {
         let required: NSEvent.ModifierFlags = [.command, .control, .option]
-        return !modifiers.intersection(required).isEmpty
+        return UInt16(exactly: keyCode) != nil
+            && modifiers.subtracting(.deviceIndependentFlagsMask).isEmpty
+            && !modifiers.intersection(required).isEmpty
     }
 
     var validationError: String? {
-        isValid ? nil : tr(
+        guard UInt16(exactly: keyCode) != nil,
+              modifiers.subtracting(.deviceIndependentFlagsMask).isEmpty else {
+            return tr("지원하지 않는 단축키 정보입니다. 다시 입력해 주세요.",
+                      "This shortcut contains unsupported key data. Enter it again.")
+        }
+        return isValid ? nil : tr(
             "Command·Option·Control 중 하나 이상을 포함해야 합니다.",
             "Must include at least one of Command, Option, or Control."
         )
     }
 
-    /// 입력기가 조합 중이어도 같은 물리 키와 수정자를 비교한다.
+    /// Matches physical keys during input-method composition and safely rejects an unrepresentable key.
     func matches(_ event: NSEvent) -> Bool {
-        event.keyCode == UInt16(keyCode)
+        guard let code = UInt16(exactly: keyCode) else { return false }
+        return event.keyCode == code
             && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == modifiers
     }
 
@@ -98,7 +106,8 @@ struct HotKeyShortcut: Equatable, Sendable {
     /// 자리이므로 표시도 그 자리의 이름이어야 한다. 현재 입력 소스로 읽으면 한글
     /// 입력 중에 `⌥⌘S`가 `⌥⌘ㄴ`으로 보여, 사용자가 실제로 눌러야 하는 키와 어긋난다.
     private static func layoutCharacter(for keyCode: UInt32) -> String? {
-        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?
+        guard let code = UInt16(exactly: keyCode),
+              let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?
                 .takeRetainedValue(),
               let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
         else { return nil }
@@ -113,7 +122,7 @@ struct HotKeyShortcut: Equatable, Sendable {
             else { return -1 }
             return UCKeyTranslate(
                 layout,
-                UInt16(keyCode),
+                code,
                 UInt16(kUCKeyActionDisplay),
                 0,  // 수정자를 빼고 눌러야 키의 기본 문자가 나온다.
                 UInt32(LMGetKbdType()),
@@ -175,24 +184,33 @@ extension HotKeyShortcut {
         }
     }
 
-    /// 앱을 다시 켜도 사용자가 정한 조합이 유지되도록 저장한다.
-    ///
-    /// 저장된 값이 없으면 기본값을 쓴다 — 사용자가 아무것도 설정하지 않은 상태에서도
-    /// 단축키가 바로 동작해야 한다.
+    /// Restores valid stored keys and falls back before narrowing corrupt integers can trap at launch.
     static func load(
         _ slot: Slot = .transcriptWindow,
         from defaults: UserDefaults = .standard
     ) -> HotKeyShortcut {
-        guard defaults.object(forKey: slot.keyCodeKey) != nil else { return slot.defaultShortcut }
+        guard let storedKey = storedInteger(defaults.object(forKey: slot.keyCodeKey)),
+              let code = UInt16(exactly: storedKey),
+              let storedModifiers = storedInteger(defaults.object(forKey: slot.modifiersKey)),
+              let rawModifiers = UInt(exactly: storedModifiers)
+        else { return slot.defaultShortcut }
         let shortcut = HotKeyShortcut(
-            keyCode: UInt32(defaults.integer(forKey: slot.keyCodeKey)),
-            modifiers: NSEvent.ModifierFlags(
-                rawValue: UInt(defaults.integer(forKey: slot.modifiersKey))
-            )
+            keyCode: UInt32(code),
+            modifiers: NSEvent.ModifierFlags(rawValue: rawModifiers)
         )
         // 저장된 값이 손상됐으면 기능을 잃는 대신 기본값으로 되돌린다. 설정 단축키가 이렇게
         // 되면 설정 창에 도달할 수단이 하나 줄어드는 셈이라 특히 중요하다.
         return shortcut.isValid ? shortcut : slot.defaultShortcut
+    }
+
+    /// Preserves integral values written by the defaults command without coercing corrupt data to zero.
+    private static func storedInteger(_ value: Any?) -> Int? {
+        if let text = value as? String {
+            return Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return Int(exactly: number.doubleValue)
     }
 
     func save(_ slot: Slot = .transcriptWindow, to defaults: UserDefaults = .standard) {

@@ -57,30 +57,35 @@ enum RecordingPreferences {
         defaults.set(language.rawValue, forKey: languageKey)
     }
 
-    /// 원본 저장 여부. 저장된 값이 없으면 기본값이다.
-    ///
-    /// `bool(forKey:)`는 값이 없을 때도 false를 반환하므로 그것만으로는 "끔"과
-    /// "정한 적 없음"을 구분할 수 없다. 기본값이 켬이라 그 구분이 필요하다 — 없는 값을
-    /// 끔으로 읽으면 첫 실행부터 원본이 저장되지 않는다.
+    /// Preserves a chosen off value while restoring the default for missing or unreadable preferences.
     static func savesAudio(from defaults: UserDefaults = .standard) -> Bool {
-        guard defaults.object(forKey: savesAudioKey) != nil else { return defaultSavesAudio }
-        return defaults.bool(forKey: savesAudioKey)
+        boolean(forKey: savesAudioKey, from: defaults, fallback: defaultSavesAudio)
     }
 
     static func save(savesAudio: Bool, to defaults: UserDefaults = .standard) {
         defaults.set(savesAudio, forKey: savesAudioKey)
     }
 
-    /// 녹취를 끝냈을 때 저장 폴더를 열지 여부. 저장된 값이 없으면 기본값이다.
-    ///
-    /// `savesAudio`와 같은 이유로 `object(forKey:)`로 존재를 먼저 확인한다 — 기본값이
-    /// 켬이라 "끔"과 "정한 적 없음"을 구분해야 하고, 없는 값을 끔으로 읽으면 첫 실행부터
-    /// 폴더가 열리지 않아 이 기능이 없는 것과 같아진다.
+    /// Keeps folder opening default-on without interpreting corrupt preference data as a user opt-out.
     static func opensFolderOnStop(from defaults: UserDefaults = .standard) -> Bool {
-        guard defaults.object(forKey: opensFolderKey) != nil else {
-            return defaultOpensFolderOnStop
+        boolean(forKey: opensFolderKey, from: defaults, fallback: defaultOpensFolderOnStop)
+    }
+
+    /// Accepts stored booleans and familiar defaults-command representations; corruption uses the fallback.
+    static func boolean(forKey key: String, from defaults: UserDefaults, fallback: Bool) -> Bool {
+        switch defaults.object(forKey: key) {
+        case let number as NSNumber:
+            if number.doubleValue == 0 { return false }
+            if number.doubleValue == 1 { return true }
+            return fallback
+        case let string as String:
+            switch string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "yes", "1": return true
+            case "false", "no", "0": return false
+            default: return fallback
+            }
+        default: return fallback
         }
-        return defaults.bool(forKey: opensFolderKey)
     }
 
     static func save(opensFolderOnStop: Bool, to defaults: UserDefaults = .standard) {
