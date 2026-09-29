@@ -14,6 +14,9 @@ final class AudioStreamConverter {
         guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
             return nil
         }
+        // Measured: the default stereo-to-mono mapping discarded a right-only
+        // 0.5-amplitude signal completely. Downmixing preserves either channel.
+        converter.downmix = inputFormat.channelCount > outputFormat.channelCount
         self.converter = converter
         self.outputFormat = outputFormat
         self.ratio = outputFormat.sampleRate / inputFormat.sampleRate

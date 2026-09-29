@@ -129,6 +129,17 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
   the monitor must read the selector from one shared source, and a test must assert they
   match — the mismatch is invisible in code review and only shows up by switching a real
   device.
+- **Read the output device's sample rate; the tap can report a stale rate.** With the
+  AirPods microphone active, both the tap and aggregate reported 48,000 Hz while the
+  physical output reported 24,000 Hz and delivered 480 frames every 20 ms (measured).
+  Interpreting those frames at 48,000 Hz doubled transcription speed and saved alternating
+  10 ms audio/gap spans, producing robotic audio. Keep the tap's PCM layout but use the
+  output device's clock rate. Observe rate changes on that device even when its UID is
+  unchanged, and invalidate callbacks before listener teardown. Verify both the analyzer
+  timeline and the decoded archive waveform with `bash scripts/check-audio-regressions.sh`.
+- **Downmix all channels explicitly before mono transcription or recording.** The default
+  AVAudioConverter channel remapping dropped a right-only stereo signal entirely
+  (measured: input amplitude 0.5, output RMS 0). Enable downmixing when reducing channels.
 - **A meeting-language change swaps the transcribers, not the session.** All three language
   configurations report the same optimal format (measured: `16000 Hz, 1ch, Int16, interleaved`
   for Korean alone, English alone, and both), so a language switch never justifies reopening
@@ -264,6 +275,8 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `swift test`: run the unit test suite (no network required). The device-switch
   tests do change the real default output device and restore it; they skip themselves on a
   machine with only one output device.
+- `bash scripts/check-audio-regressions.sh`: run the measured AirPods 24/48 kHz,
+  stereo-channel, input-clock and decoded-recording regression harness without hardware.
 
 Run the app as a bundle rather than as a bare executable, because macOS ties microphone
 and audio-capture permissions (TCC) to the bundle identifier.

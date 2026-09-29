@@ -1,8 +1,49 @@
 import AVFoundation
+import Speech
 import XCTest
 @testable import Scribird
 
 final class AudioRecorderContinuityTests: XCTestCase {
+    func test_airPodsDuplex_staleTapRatePreservesTranscriptClockAndRecordedWaveform() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = AudioRecorder(directory: directory, originHostTime: hostTime(0))
+        let reported = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                                  sampleRate: 48_000, channels: 2, interleaved: true))
+        let target = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                                sampleRate: 16_000, channels: 1, interleaved: true))
+        let pump = AnalyzerInputPump(speaker: .remote, targetFormat: target, audioRecorder: recorder)
+        let stream = pump.makeInputStream()
+        // Hardware measurement: the same output UID delivers 480 frames every 20 ms,
+        // even though the tap and aggregate advertise 48 kHz. The device clock is 24 kHz.
+        for index in 0..<150 {
+            let format = try SystemAudioCapture.captureFormat(
+                tapDescription: reported.streamDescription.pointee, outputSampleRate: 24_000
+            )
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+            buffer.frameLength = 480
+            for frame in 0..<480 {
+                let sample = Float(0.2 * sin(2 * .pi * 997 * Double(index * 480 + frame) / 24_000))
+                buffer.floatChannelData![0][frame * 2] = sample
+                buffer.floatChannelData![0][frame * 2 + 1] = sample
+            }
+            pump.submit(buffer, hostTime: hostTime(Double(index) * 0.020))
+        }
+        pump.finish()
+        var delivered = 0
+        for await input in stream {
+            XCTAssertEqual(input.bufferStartTime?.seconds ?? -1, Double(delivered) / 16_000, accuracy: 0.000001)
+            delivered += Int(input.buffer.frameLength)
+        }
+        XCTAssertEqual(Double(delivered) / 16_000, 3, accuracy: 0.001,
+                       "The broken tap-rate path delivered only 1.5 seconds")
+        let samples = try decode(recorder)
+        XCTAssertEqual(Double(samples.count) / 48_000, 3, accuracy: 0.025)
+        XCTAssertGreaterThan(snr(samples, from: 0.5, to: 2.5), 45,
+                             "A 20 ms tone/silence pattern must not survive in the archive")
+        XCTAssertEqual(rms(samples, from: 0.5, to: 2.5), sqrt(0.02), accuracy: 0.005)
+    }
+
     func test_write_continuous44100Hz_preservesWaveformAcrossCaptureBoundaries() throws {
         // These exact inputs produced 28.18/31.04 dB SNR before the fix.
         for chunk in [512, 4096] {

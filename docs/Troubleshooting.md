@@ -81,6 +81,19 @@ Recording* — Scribird never requests screen recording.
 
 ## Diagnose by symptom
 
+### AirPods recording sounds robotic or plays at the wrong speed
+
+AirPods can switch to a 24 kHz output clock while its microphone is active. In the
+measured failure, macOS still reported 48 kHz for the process tap and aggregate device.
+Reading 480 frames delivered every 20 ms at that reported rate doubled transcription
+speed and produced repeated 10 ms gaps in the saved file. Moving level meters do not
+rule out this error.
+
+The capture path reads the physical output device's clock and observes rate changes on
+that device, including changes that keep the same device UID. Developers should run
+`bash scripts/check-audio-regressions.sh` and the explicit AirPods hardware probe in
+`CONTRIBUTING.md`. Existing damaged recordings are not automatically rewritten.
+
 ### Only my own voice is transcribed
 
 The system-audio path is down. In order of likelihood:

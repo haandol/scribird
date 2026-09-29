@@ -79,6 +79,7 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
     private var tapID: AudioObjectID = .zero
     private var aggregateID: AudioObjectID = .zero
     private var ioProcID: AudioDeviceIOProcID?
+    private let rateMonitor = OutputSampleRateMonitor()
 
     /// 캡처할 장치의 UID. nil이면 시스템 기본 출력을 쓴다.
     ///
@@ -148,8 +149,26 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
             lock.withLock { aggregateID = aggregate }
 
             // 3) 탭의 실제 오디오 포맷을 읽어 변환기를 준비한다.
-            let format = try Self.tapStreamFormat(tapID: tap)
+            let outputDevice = AudioDeviceCatalog.deviceID(forUID: outputUID)
+            guard outputDevice != .zero else { throw CaptureError.noOutputDevice }
+            let reportedFormat = try Self.tapStreamFormat(tapID: tap)
+            // streamDescription is borrowed storage. Keep its AVAudioFormat owner alive
+            // through the value copy; chaining the temporary produced formatUnavailable.
+            let format = try withExtendedLifetime(reportedFormat) {
+                try Self.captureFormat(
+                    tapDescription: reportedFormat.streamDescription.pointee,
+                    outputSampleRate: CoreAudioRateObserver().rate(device: outputDevice)
+                )
+            }
             lock.withLock { tapFormat = format }
+            rateMonitor.start(device: outputDevice) { [weak self] rate in
+                self?.lock.withLock {
+                    guard let self, let current = self.tapFormat,
+                          let next = try? Self.captureFormat(tapDescription: current.streamDescription.pointee,
+                                                            outputSampleRate: rate) else { return }
+                    self.tapFormat = next
+                }
+            }
             guard pump.prepare(sourceFormat: format) else {
                 throw CaptureError.formatUnavailable
             }
@@ -208,6 +227,9 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
     }
 
     private func teardownResources() {
+        // Core Audio can deliver callbacks after successful listener removal.
+        // Invalidate their generation before releasing either the tap or device.
+        rateMonitor.stop()
         let (aggregate, proc, tap) = lock.withLock {
             let values = (aggregateID, ioProcID, tapID)
             aggregateID = .zero
@@ -249,6 +271,20 @@ final class SystemAudioCapture: CaptureSource, @unchecked Sendable {
     }
 
     // MARK: - Core Audio 헬퍼
+
+    /// Uses the clock device's rate because Bluetooth duplex mode can leave the tap's
+    /// advertised rate stale: measured 480 frames / 20 ms while the tap reported 48 kHz.
+    static func captureFormat(
+        tapDescription: AudioStreamBasicDescription, outputSampleRate: Double
+    ) throws -> AVAudioFormat {
+        guard outputSampleRate.isFinite, outputSampleRate > 0 else {
+            throw CaptureError.formatUnavailable
+        }
+        var description = tapDescription
+        description.mSampleRate = outputSampleRate
+        guard let format = audioFormat(from: description) else { throw CaptureError.formatUnavailable }
+        return format
+    }
 
     /// 탭이 대상으로 삼는 출력 장치 셀렉터.
     ///

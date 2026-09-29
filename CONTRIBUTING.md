@@ -158,6 +158,28 @@ Some traps that are easy to hit here:
   the lock-wrapped box in the shared test support rather than capturing a local `var` —
   Swift 6 rejects the latter, and the fix is the box, not a weaker annotation.
 
+### Measured audio regression harness
+
+Run `bash scripts/check-audio-regressions.sh` after capture, format conversion, input-pump,
+or audio-recorder changes. The harness includes the measured AirPods duplex failure:
+the physical output runs at 24,000 Hz with 480-frame callbacks every 20 ms, while the
+tap and aggregate report 48,000 Hz. Tests require both the 16 kHz transcription timeline
+and the decoded 48 kHz recording to preserve duration and waveform. A format assertion
+alone cannot detect periodic gaps in a playable file. Stereo tests also require a signal
+on either channel to reach mono transcription.
+
+For the hardware smoke test, use AirPods as the input and output, record with its microphone
+active, and verify natural playback speed and continuous sound. Start and stop another
+microphone user while recording so the same output UID switches between stereo and duplex
+rates. Both transcription and the saved recording must stay continuous. Switching to a
+different UID alone does not cover this failure. Do not commit the test recording.
+
+`bash scripts/check-airpods-capture.sh` runs a separate, explicit hardware timing
+probe against the production capture sources. It activates the default microphone
+briefly, checks analyzer duration, stops the microphone, and checks the same output
+again. It saves no audio or transcript. It checks timing only: silent permission-denied
+callbacks can still pass, so the audible bundle smoke test remains necessary.
+
 ### Speech-to-text fixture tests
 
 The transcription pipeline downstream of capture — conversion, timing, the analyzer, and
