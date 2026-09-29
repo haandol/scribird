@@ -155,5 +155,5 @@ sequenceDiagram
 
 ## Related
 
-- [원본 오디오를 리샘플링 전 AAC로 보관한다](./0002-original-audio-format.md)
+- [회의 음성을 녹음 중 하나의 모노 M4A로 합성한다](./0002-original-audio-format.md)
 - [화자를 오디오 소스로 확정하고 2화자 상한을 수용한다](../transcription/0001-source-based-speaker-attribution.md)

@@ -143,7 +143,7 @@ stateDiagram-v2
 ## Related
 
 - [회의록을 발화 확정 즉시 append 하고 종료를 시간 제한한다](../archive/0001-transcript-durability.md)
-- [원본 오디오를 리샘플링 전 AAC로 보관한다](../archive/0002-original-audio-format.md)
+- [회의 음성을 녹음 중 하나의 모노 M4A로 합성한다](../archive/0002-original-audio-format.md)
 - [두 캡처 소스의 실패를 서로 격리한다](../capture/0003-per-source-failure-isolation.md)
 - [언어 모델 확보를 녹취 시작의 게이트로 둔다](../transcription/0003-model-provisioning-gate.md)
 - [전사 화면을 전역 단축키로 어디서든 띄운다](./0002-global-hotkey-floating-window.md)

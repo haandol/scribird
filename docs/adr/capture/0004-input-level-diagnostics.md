@@ -137,4 +137,4 @@ UI는 레벨을 **고정 주기로 읽어** 갱신한다. 레벨은 초당 수�
 ## Related
 
 - [캡처 성공을 반환값이 아니라 진폭으로 판정한다](./0002-silent-capture-detection.md)
-- [원본 오디오를 리샘플링 전 AAC로 보관한다](../archive/0002-original-audio-format.md)
+- [회의 음성을 녹음 중 하나의 모노 M4A로 합성한다](../archive/0002-original-audio-format.md)

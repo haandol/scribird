@@ -156,6 +156,6 @@ flowchart TD
 ## Related
 
 - [회의록을 발화 확정 즉시 append 하고 종료를 시간 제한한다](./0001-transcript-durability.md)
-- [원본 오디오를 리샘플링 전 AAC로 보관한다](./0002-original-audio-format.md)
+- [회의 음성을 녹음 중 하나의 모노 M4A로 합성한다](./0002-original-audio-format.md)
 - [설정을 전사 화면에서 분리해 별도 창에 둔다](../session/0003-settings-surface-separation.md)
 - [캡처를 끊지 않고 세션 경계를 끊는다](../session/0001-session-boundary-control.md)

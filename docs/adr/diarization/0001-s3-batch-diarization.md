@@ -187,4 +187,4 @@ S3 저장을 피하고 오디오를 직접 전송할 수 있다. 그러나 완�
 ## Related
 
 - [화자를 오디오 소스로 확정하고 2화자 상한을 수용한다](../transcription/0001-source-based-speaker-attribution.md)
-- [원본을 소스별로 리샘플링 전 AAC로 저장한다](../archive/0002-original-audio-format.md)
+- [회의 음성을 녹음 중 하나의 모노 M4A로 합성한다](../archive/0002-original-audio-format.md)
