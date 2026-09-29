@@ -51,6 +51,14 @@ def model_directory():
     return directory
 
 
+def generated_text(model, samples, language):
+    """Use the same decoding limit for live and file chunks, returning only complete text."""
+    result = model.generate(samples, language=language, max_tokens=1024, verbose=False)
+    if result.generation_tokens >= 1024:
+        raise RuntimeError("Qwen3 reached the decoding limit; the chunk was not saved as a complete transcript.")
+    return result.text.strip()
+
+
 def transcribe(audio_path, language, emit):
     """Emit complete local chunks with input-relative times; reject truncated generation."""
     import numpy as np
@@ -75,10 +83,7 @@ def transcribe(audio_path, language, emit):
                 divisor = math.gcd(sample_rate, 16000)
                 if sample_rate != 16000:
                     mono = resample_poly(mono, 16000 // divisor, sample_rate // divisor).astype(np.float32)
-                result = model.generate(mono, language=language.title(), max_tokens=1024, verbose=False)
-                if result.generation_tokens >= 1024:
-                    raise RuntimeError("Qwen3 reached the decoding limit; the chunk was not saved as a complete transcript.")
-                text = result.text.strip()
+                text = generated_text(model, mono, language.title())
                 if text:
                     emit({"event": "segment", "start": offset / sample_rate,
                           "end": (offset + frames) / sample_rate, "text": text})
@@ -133,11 +138,7 @@ def live(input_lines, emit):
             raise ValueError("Invalid live PCM chunk")
         text = ""
         if np.max(np.abs(samples)) > 1e-7:
-            result = model.generate(samples, language=None if language == "auto" else language.title(),
-                                    max_tokens=1024, verbose=False)
-            if result.generation_tokens >= 1024:
-                raise RuntimeError("Qwen3 reached the decoding limit; the chunk was not saved as a complete transcript.")
-            text = result.text.strip()
+            text = generated_text(model, samples, None if language == "auto" else language.title())
         emit({"event": "result", "text": text})
 
 
