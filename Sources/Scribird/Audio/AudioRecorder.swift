@@ -188,6 +188,7 @@ final class AudioRecorder: @unchecked Sendable {
         }
     }
 
+    /// Writes a full timeline block, filling gaps in place and clamping only recorded samples.
     @discardableResult
     private func writeBlock(_ blockIndex: Int64) -> Bool {
         guard !failed else { return false }
@@ -202,10 +203,12 @@ final class AudioRecorder: @unchecked Sendable {
             }
 
             buffer.frameLength = AVAudioFrameCount(Self.blockFrames)
-            let samples = pendingBlocks.removeValue(forKey: blockIndex)?.samples
-                ?? Array(repeating: 0, count: Int(Self.blockFrames))
-            for index in samples.indices {
-                output[index] = min(1, max(-1, samples[index]))
+            if let samples = pendingBlocks.removeValue(forKey: blockIndex)?.samples {
+                for index in samples.indices {
+                    output[index] = min(1, max(-1, samples[index]))
+                }
+            } else {
+                output.update(repeating: 0, count: Int(Self.blockFrames))
             }
 
             let writable: AVAudioPCMBuffer
