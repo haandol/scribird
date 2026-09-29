@@ -271,15 +271,11 @@ final class LanguageArbiter {
         return totalWeight > 0 ? weighted / totalWeight : 0
     }
 
-    /// 겹치는 구간들을 이어 붙여 독립된 시간 구역 목록을 만든다.
-    ///
-    /// 두 언어 모델의 토큰 경계가 다르므로, 어느 한쪽의 경계를 기준으로 삼을 수
-    /// 없다. 겹침 관계를 따라 병합해서 "여기부터 여기까지는 한 판단 단위"라는
-    /// 구역을 만든다.
+    /// Merges overlapping nonempty ranges into language competition regions.
+    /// The sole caller filters and maps start-sorted tokens, preserving their order.
     private static func buildRegions(from ranges: [CMTimeRange]) -> [CMTimeRange] {
-        let sorted = ranges.filter { !$0.isEmpty }.sorted { $0.start < $1.start }
         var regions: [CMTimeRange] = []
-        for range in sorted {
+        for range in ranges where !range.isEmpty {
             if let last = regions.last, !last.intersection(range).isEmpty {
                 regions[regions.count - 1] = last.union(range)
             } else {
