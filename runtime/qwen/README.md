@@ -30,6 +30,12 @@ from the [official Qwen3-ASR-1.7B configuration](https://huggingface.co/Qwen/Qwe
 read on 2026-09-28. Inference uses
 [mlx-audio's Qwen3 implementation](https://github.com/Blaizzy/mlx-audio/tree/main/mlx_audio/stt/models/qwen3_asr).
 
+Worker unit tests run through `bash scripts/check-python-tests.sh` from the repository
+root. The frozen `test` dependency group includes the real audio and Hub libraries;
+the MLX loader is stubbed without importing MLX. This supports Linux CI without model
+downloads and keeps `build/qwen-test-venv` separate from the full `.venv`. Model
+accuracy still requires the opt-in cached-model integration tests in CONTRIBUTING.md.
+
 Input is decoded to a temporary mono WAV by the app. The worker reads at most
 20 seconds at a time, resamples to 16 kHz, then emits finalized chunk text as JSONL
 on stdout. Diagnostics go to stderr. Times describe input chunks, not exact speech

@@ -291,8 +291,23 @@ by measurement, and breaking it reintroduces a bug that is hard to notice.
 - `swift test`: run the unit test suite (no network required). The device-switch
   tests do change the real default output device and restore it; they skip themselves on a
   machine with only one output device.
+- `bash scripts/check-swift-tests.sh`: run the Swift suite without real default-device
+  switches, retaining selector assertions and measured audio regressions. Arguments
+  are forwarded to `swift test`; a full run already builds the app and covers the audio harness.
+- `bash scripts/check-python-tests.sh`: run MCP, plugin and Qwen worker tests with
+  frozen dependencies. Qwen uses a separate `build/qwen-test-venv` with only the test
+  dependency group; the full inference environment stays available.
 - `bash scripts/check-audio-regressions.sh`: run the measured AirPods 24/48 kHz,
   stereo-channel, input-clock and decoded-recording regression harness without hardware.
+
+GitHub CI runs the Swift and Python scripts in parallel macOS 26 and Linux jobs.
+It caches Python downloads by lockfile and cancels superseded PR/branch runs.
+The Swift job enables the existing MCP socket integration test after preparing its
+Python client and disables IDE indexing while retaining debug actor checks.
+Swift cases remain serial because some share preferences/AppKit state;
+hardware, model and screenshot tests retain their existing opt-ins or manual checks.
+Catalog checks skip when the required devices are absent; preference persistence
+and warning tests use fixed device IDs and still run.
 
 Run the app as a bundle rather than as a bare executable, because macOS ties microphone
 and audio-capture permissions (TCC) to the bundle identifier.

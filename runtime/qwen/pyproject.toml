@@ -4,5 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.11,<3.14"
 dependencies = ["mlx-audio>=0.3.1,<0.5", "soundfile>=0.13", "scipy>=1.15"]
 
+[dependency-groups]
+test = ["numpy>=2", "soundfile>=0.13", "scipy>=1.15", "huggingface-hub>=0.34,<2"]
+
 [tool.uv]
 package = false

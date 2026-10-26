@@ -4,8 +4,8 @@ import base64
 import json
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, patch
 import sys
 
 import numpy as np
@@ -19,7 +19,6 @@ import transcribe as worker
 class QwenWorkerTests(unittest.TestCase):
     def test_liveChunks_reuseModelAndPreserveExplicitOrAutomaticLanguage(self):
         """Two independent chunks load once, with auto detection reserved for the mixed setting."""
-        from unittest.mock import Mock
         model = Mock()
         model.generate.return_value = SimpleNamespace(text="recognized", generation_tokens=1)
         audio = base64.b64encode(np.full(1600, 0.1, dtype="<f4").tobytes()).decode()
@@ -42,6 +41,24 @@ class QwenWorkerTests(unittest.TestCase):
         self.snapshot.mkdir()
         for name in worker.MODEL_FILES:
             (self.snapshot / name).write_bytes(b"test asset")
+        # The loader is already mocked in each test. Avoid importing its full MLX
+        # dependency graph just to replace it, so worker tests also run on Linux.
+        stt = ModuleType("mlx_audio.stt")
+        stt.load = Mock(side_effect=AssertionError("Set the test's model loader explicitly"))
+        mlx_audio = ModuleType("mlx_audio")
+        mlx_audio.stt = stt
+        modules = {"mlx_audio": mlx_audio, "mlx_audio.stt": stt}
+        originals = {name: sys.modules.get(name) for name in modules}
+        sys.modules.update(modules)
+        def restore_modules():
+            # Restore only our stubs: removing lazily imported NumPy/SciPy native
+            # modules would make the next test try to load them a second time.
+            for name, original in originals.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+        self.addCleanup(restore_modules)
 
     def test_completeCachedModel_usesPinnedLocalSnapshotWithoutNetworkLookup(self):
         """A ready model must be reused locally with the exact selected repository and revision."""

@@ -78,15 +78,30 @@ final class AudioDeviceMonitorTests: XCTestCase {
         monitor.start()
         monitor.stop()
     }
+}
+
+/// Real device switches stay separate so automated runs retain selector coverage.
+final class AudioDeviceSwitchNotificationTests: XCTestCase {
+    private var switcher: OutputDeviceSwitcher!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        guard let available = OutputDeviceSwitcher() else {
+            throw XCTSkip("At least two output devices are required for a real device switch.")
+        }
+        switcher = available
+    }
+
+    override func tearDownWithError() throws {
+        switcher?.restore()
+        switcher = nil
+        try super.tearDownWithError()
+    }
 
     /// 감시하지 않는 상태에서는 장치가 바뀌어도 통지하지 않는다.
     ///
     /// 대기 중에 따라가면 다음 시작이 읽을 장치를 미리 건드리는 셈이 된다.
     func test_stoppedMonitor_doesNotNotify() throws {
-        let switcher = try XCTUnwrap(
-            OutputDeviceSwitcher(),
-            "출력 장치가 둘 이상이어야 이 테스트가 판별력을 갖는다"
-        )
         let notified = expectation(description: "통지되지 않아야 한다")
         notified.isInverted = true
 
@@ -96,22 +111,10 @@ final class AudioDeviceMonitorTests: XCTestCase {
 
         switcher.switchToOther()
         wait(for: [notified], timeout: 1.5)
-        switcher.restore()
     }
-}
-
-/// 실제 출력 장치를 바꿔 감시기가 발화하는지 확인한다.
-///
-/// 장치가 둘 이상 있는 기기에서만 판별력이 있다. 하나뿐이면 전환할 대상이 없어 건너뛴다 —
-/// 이 경로는 실기 확인이 필요하므로 수동 스모크 테스트가 최종 근거다.
-final class AudioDeviceSwitchNotificationTests: XCTestCase {
 
     /// 장치를 실제로 바꾸면 출력 변경으로 통지된다.
     func test_switchingOutputDevice_notifiesOutputChange() throws {
-        let switcher = try XCTUnwrap(
-            OutputDeviceSwitcher(),
-            "출력 장치가 둘 이상이어야 이 테스트가 판별력을 갖는다"
-        )
         let notified = expectation(description: "출력 변경 통지")
         // 알림은 감시기의 전용 큐에서 오므로, 관측값을 락으로 감싼 상자에 모은다.
         let observed = LockedBox<[AudioDeviceMonitor.Change]>([])
@@ -121,7 +124,7 @@ final class AudioDeviceSwitchNotificationTests: XCTestCase {
             notified.fulfill()
         }
         monitor.start()
-        defer { monitor.stop(); switcher.restore() }
+        defer { monitor.stop() }
 
         switcher.switchToOther()
         wait(for: [notified], timeout: 3)
@@ -135,16 +138,12 @@ final class AudioDeviceSwitchNotificationTests: XCTestCase {
     /// 합치는 간격 안에 A→B→A로 돌아오면 최종 장치가 처음과 같으므로 재연결할 이유가
     /// 없다. 매 알림에 반응하면 여기서 두 번 재연결이 걸려 장치를 잃는다.
     func test_switchingBackWithinCoalescingWindow_doesNotNotify() throws {
-        let switcher = try XCTUnwrap(
-            OutputDeviceSwitcher(),
-            "출력 장치가 둘 이상이어야 이 테스트가 판별력을 갖는다"
-        )
         let notified = expectation(description: "통지되지 않아야 한다")
         notified.isInverted = true
 
         let monitor = AudioDeviceMonitor { _ in notified.fulfill() }
         monitor.start()
-        defer { monitor.stop(); switcher.restore() }
+        defer { monitor.stop() }
 
         // 합치는 간격보다 빠르게 갔다 온다 — 최종 상태는 처음과 같다.
         switcher.switchToOther()
@@ -159,10 +158,6 @@ final class AudioDeviceSwitchNotificationTests: XCTestCase {
     /// 재연결하면 재연결이 겹쳐 장치를 잃으므로, 최종 장치가 하나면 통지도 한 번이어야
     /// 한다. 여기서는 한 방향으로만 바꿔 최종 상태를 확정한 뒤 통지 수를 센다.
     func test_singleSwitch_notifiesExactlyOnce() throws {
-        let switcher = try XCTUnwrap(
-            OutputDeviceSwitcher(),
-            "출력 장치가 둘 이상이어야 이 테스트가 판별력을 갖는다"
-        )
         let counted = expectation(description: "통지 수신")
         counted.assertForOverFulfill = false
         let count = LockedBox(0)
@@ -172,7 +167,7 @@ final class AudioDeviceSwitchNotificationTests: XCTestCase {
             counted.fulfill()
         }
         monitor.start()
-        defer { monitor.stop(); switcher.restore() }
+        defer { monitor.stop() }
 
         switcher.switchToOther()
         wait(for: [counted], timeout: 3)

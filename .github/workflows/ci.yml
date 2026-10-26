@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift:
+    name: Swift and MCP integration
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: mcp/uv.lock
+      - name: Show toolchain
+        run: swift --version
+      - name: Prepare MCP integration client
+        run: uv sync --project mcp --frozen
+      # swift test already builds the app and includes the audio regression harness.
+      - name: Build and test
+        env:
+          SCRIBIRD_MCP_INTEGRATION: "1"
+        run: bash scripts/check-swift-tests.sh --disable-index-store
+
+  python:
+    name: Python worker, MCP and plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: |
+            mcp/uv.lock
+            runtime/qwen/uv.lock
+      - name: Run Python suites
+        run: bash scripts/check-python-tests.sh

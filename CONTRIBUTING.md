@@ -62,8 +62,9 @@ uv run --directory mcp --frozen python -m unittest discover -s tests -v
 client/server against a Swift control socket and the normal recorder. Only speech and
 capture are replaced. It verifies bilingual selection, language switches, same-second
 session rotation, saved-file reads and rejected state changes. Hardware-switch tests
-are separate; use `swift test --skip 'AudioDeviceMonitorTests|AudioDeviceSwitchNotificationTests'` when other work needs the
-Mac's audio devices left in place. Transcript tools return text to the configured client.
+are separate; use `bash scripts/check-swift-tests.sh` when other work needs the
+Mac's audio devices left in place. Selector assertions still run. Transcript tools
+return text to the configured client.
 
 Scribird is a Swift Package with no external dependencies. The required macOS and Swift
 versions are declared in `Package.swift`.
@@ -126,6 +127,40 @@ never carries ADR IDs — the two are located by reading and searching, so that 
 ADR doesn't force a code change and vice versa.
 
 ## Testing
+
+### Automated checks
+
+```bash
+bash scripts/check-swift-tests.sh   # macOS 26+, no default-device switches
+bash scripts/check-python-tests.sh # MCP, diarization plugin and Qwen worker
+```
+
+The Swift script forwards arguments, for example `--filter AudioRecorderTests`.
+It builds and runs the suite once, including the measured audio regressions; there
+is no need to precede it with `swift build` or repeat the audio harness after a full
+run. It excludes only `AudioDeviceSwitchNotificationTests`, which changes the real
+output device. Existing model, fixture and screenshot opt-ins still apply. Run
+`swift test --filter AudioDeviceSwitchNotificationTests` separately when changing
+devices is safe; machines without two output devices report skips.
+Catalog checks also report skips when their input/output devices are absent;
+preference persistence and warning tests use fixed device IDs and still run.
+
+The Python script uses `uv` and frozen lockfiles. Its first run may download Python
+dependencies; unit tests mock network and model calls. Qwen worker tests install only
+the `test` dependency group into `build/qwen-test-venv`, leaving the full runtime's
+`.venv` available for local inference. They use real audio I/O and resampling
+libraries with a stubbed MLX loader; they do not establish model accuracy.
+
+GitHub Actions runs these scripts in parallel jobs on macOS 26 (Swift) and Linux
+(Python) for pull requests and pushes to `main`. The macOS job also prepares the
+MCP client and enables the existing `SCRIBIRD_MCP_INTEGRATION=1` socket test in the
+same Swift run. Python downloads are cached by lockfile, and a newer run on the
+same PR or branch cancels the older run. Swift cases remain serial because some
+tests share preferences and AppKit state. CI disables the IDE index store while
+keeping debug actor checks enabled. Hardware and cached-model smoke tests
+remain separate from CI.
+
+### Test conventions
 
 Tests live in `Tests/ScribirdTests/` and run with `swift test`. Name methods
 `test_<behavior>_<expectedResult>()`. Keep them deterministic — no sleeps, no real audio

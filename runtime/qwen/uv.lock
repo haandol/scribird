@@ -773,9 +773,27 @@ dependencies = [
     { name = "soundfile" },
 ]
 
+[package.dev-dependencies]
+test = [
+    { name = "huggingface-hub" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "soundfile" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "mlx-audio", specifier = ">=0.3.1,<0.5" },
+    { name = "scipy", specifier = ">=1.15" },
+    { name = "soundfile", specifier = ">=0.13" },
+]
+
+[package.metadata.requires-dev]
+test = [
+    { name = "huggingface-hub", specifier = ">=0.34,<2" },
+    { name = "numpy", specifier = ">=2" },
     { name = "scipy", specifier = ">=1.15" },
     { name = "soundfile", specifier = ">=0.13" },
 ]

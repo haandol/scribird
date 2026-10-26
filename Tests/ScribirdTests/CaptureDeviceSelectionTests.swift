@@ -51,10 +51,7 @@ final class CaptureDeviceSelectionTests: XCTestCase {
 
     /// 고른 장치가 존재하면 그 장치에 고정되고 기본 변경을 따라가지 않는다.
     func test_pinnedExistingDevice_doesNotFollowSystemDefault() throws {
-        let device = try XCTUnwrap(
-            AudioDeviceCatalog.devices(for: .output).first,
-            "출력 장치가 하나도 없어 고정을 검증할 수 없다"
-        )
+        let device = try XCTUnwrap(availableDevices(for: .output).first)
         RecordingPreferences.save(pinnedDeviceUID: device.uid, for: .output, to: defaults)
 
         let resolution = CaptureDeviceSelection.resolve(for: .output, defaults: defaults)
@@ -70,10 +67,7 @@ final class CaptureDeviceSelectionTests: XCTestCase {
     /// 입력만 고정하고 출력은 따라가게 두는 조합이 가능해야 한다 — 두 소스는 서로 다른 이유로
     /// 고정되고(마이크는 품질, 출력은 회의 앱 라우팅), 한쪽이 다른 쪽을 강제하면 안 된다.
     func test_pinningOneSource_leavesTheOtherFollowing() throws {
-        let inputDevice = try XCTUnwrap(
-            AudioDeviceCatalog.devices(for: .input).first,
-            "입력 장치가 없어 검증할 수 없다"
-        )
+        let inputDevice = try XCTUnwrap(availableDevices(for: .input).first)
         RecordingPreferences.save(pinnedDeviceUID: inputDevice.uid, for: .input, to: defaults)
 
         let input = CaptureDeviceSelection.resolve(for: .input, defaults: defaults)
@@ -86,8 +80,7 @@ final class CaptureDeviceSelectionTests: XCTestCase {
 
     /// 선택을 지우면 따라가기로 돌아간다.
     func test_clearingSelection_returnsToFollowing() throws {
-        let device = try XCTUnwrap(AudioDeviceCatalog.devices(for: .input).first)
-        RecordingPreferences.save(pinnedDeviceUID: device.uid, for: .input, to: defaults)
+        RecordingPreferences.save(pinnedDeviceUID: "test-input-uid", for: .input, to: defaults)
         RecordingPreferences.save(pinnedDeviceUID: nil, for: .input, to: defaults)
 
         XCTAssertEqual(CaptureDeviceSelection.resolve(for: .input, defaults: defaults),
@@ -99,13 +92,12 @@ final class CaptureDeviceSelectionTests: XCTestCase {
 
     /// 선택은 앱을 다시 켜도 유지된다. 설정 창 항목의 계약이다.
     func test_selection_isRestored() throws {
-        let device = try XCTUnwrap(AudioDeviceCatalog.devices(for: .output).first)
-
-        RecordingPreferences.save(pinnedDeviceUID: device.uid, for: .output, to: defaults)
+        let uid = "test-output-uid"
+        RecordingPreferences.save(pinnedDeviceUID: uid, for: .output, to: defaults)
 
         XCTAssertEqual(
             RecordingPreferences.pinnedDeviceUID(for: .output, from: defaults),
-            device.uid,
+            uid,
             "저장한 장치 선택이 복원되지 않아 매번 초기화된다"
         )
     }
@@ -115,12 +107,12 @@ final class CaptureDeviceSelectionTests: XCTestCase {
     /// 장치 번호(`AudioObjectID`)는 실행마다 바뀌므로 저장하면 다음 실행에서 엉뚱한 장치를
     /// 가리킨다. 저장값이 UID 형태인지 확인한다.
     func test_storedValue_isTheStableUIDNotADeviceNumber() throws {
-        let device = try XCTUnwrap(AudioDeviceCatalog.devices(for: .output).first)
-        RecordingPreferences.save(pinnedDeviceUID: device.uid, for: .output, to: defaults)
+        let uid = "test-output-uid"
+        RecordingPreferences.save(pinnedDeviceUID: uid, for: .output, to: defaults)
 
         let stored = try XCTUnwrap(defaults.string(forKey: "pinnedOutputDeviceUID"))
 
-        XCTAssertEqual(stored, device.uid)
+        XCTAssertEqual(stored, uid)
         XCTAssertNil(AudioObjectID(stored),
                      "장치 번호를 저장했다 — 실행마다 바뀌어 다음 실행에서 다른 장치를 가리킨다")
     }
@@ -171,10 +163,9 @@ final class CaptureDeviceSelectionTests: XCTestCase {
             CaptureDeviceSelection.warning(for: .systemDefault, change: .output),
             "따라가기 상태인데 경고가 뜬다"
         )
-        let device = try XCTUnwrap(AudioDeviceCatalog.devices(for: .output).first)
         XCTAssertNil(
             CaptureDeviceSelection.warning(
-                for: .pinned(uid: device.uid, name: device.name), change: .output
+                for: .pinned(uid: "test-output-uid", name: "Test output"), change: .output
             ),
             "정상적으로 고정된 상태인데 경고가 뜬다"
         )
@@ -194,9 +185,9 @@ final class CaptureDeviceSelectionTests: XCTestCase {
     ///  1   0  MacBook Pro Microphone
     ///  2   2  ZoomAudioDevice (가상)
     /// ```
-    func test_deviceLists_containOnlyUsableDevices() {
-        let inputs = AudioDeviceCatalog.devices(for: .input)
-        let outputs = AudioDeviceCatalog.devices(for: .output)
+    func test_deviceLists_containOnlyUsableDevices() throws {
+        let inputs = try availableDevices(for: .input)
+        let outputs = try availableDevices(for: .output)
 
         XCTAssertFalse(inputs.isEmpty, "입력 장치 목록이 비었다 — 마이크를 고를 수 없다")
         XCTAssertFalse(outputs.isEmpty, "출력 장치 목록이 비었다")
@@ -211,8 +202,8 @@ final class CaptureDeviceSelectionTests: XCTestCase {
     }
 
     /// 목록의 장치는 모두 UID로 되찾을 수 있다.
-    func test_listedDevices_areResolvableByUID() {
-        for device in AudioDeviceCatalog.devices(for: .output) {
+    func test_listedDevices_areResolvableByUID() throws {
+        for device in try availableDevices(for: .output) {
             XCTAssertTrue(
                 AudioDeviceCatalog.exists(uid: device.uid),
                 "목록에 있는 «\(device.name)»을 UID로 되찾지 못한다"
@@ -235,12 +226,37 @@ final class CaptureDeviceSelectionTests: XCTestCase {
     }
 
     /// 목록의 이름이 비어 있지 않다 — 이름 없이는 고를 수 없다.
-    func test_listedDevices_haveNames() {
+    func test_listedDevices_haveNames() throws {
         for change in [AudioDeviceMonitor.Change.input, .output] {
-            for device in AudioDeviceCatalog.devices(for: change) {
+            for device in try availableDevices(for: change) {
                 XCTAssertFalse(device.name.trimmingCharacters(in: .whitespaces).isEmpty,
                                "이름이 없는 장치가 목록에 있다 (uid=\(device.uid))")
             }
         }
+    }
+
+    private func availableDevices(for change: AudioDeviceMonitor.Change) throws -> [AudioDevice] {
+        // Check the hardware independently: an empty result from the catalog
+        // under test must still fail when Core Audio has a default device.
+        var address = AudioObjectPropertyAddress(
+            mSelector: change == .input
+                ? kAudioHardwarePropertyDefaultInputDevice : kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID.zero
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+        )
+        guard status == noErr else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+        guard deviceID != .zero else {
+            throw XCTSkip("No default \(change) audio device is available for the Core Audio catalog check.")
+        }
+        let devices = AudioDeviceCatalog.devices(for: change)
+        XCTAssertFalse(devices.isEmpty, "Core Audio has a device, but the catalog is empty")
+        return devices
     }
 }
