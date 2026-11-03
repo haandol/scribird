@@ -1,15 +1,12 @@
 # Scribird 릴리즈 노트 작성 기준
 
-## 사실을 모으는 순서
+## 확인된 릴리즈 근거를 재사용한다
 
-릴리즈 노트 초안이 사실의 원천이 되어서는 안 된다. 다음 증거를 하나의 릴리즈 레코드로 모은
-뒤 사용자용 문장으로 편집한다.
-
-1. 릴리즈 target SHA와 이전 공개 tag 사이의 실제 diff
-2. commit 제목과 본문, 관련 PR·issue
-3. 변경된 ADR, README, Troubleshooting, 권한·설치 문서
-4. 테스트, release build, 서명, 수동 smoke test의 실제 출력
-5. 지원·복구 정보와 알려진 문제
+릴리즈 노트 초안을 사실의 원천으로 삼지 않는다.
+[후보 판정](release-candidate.md)에서 확정한 target과 이전 공개 tag, 변경 내역·사용자
+문서와 [검증 단계](release-validation.md)의 실제 결과를 재사용한다. 노트 작성만을 위해
+같은 수집·테스트를 반복하지 않는다. 빠진 변경이나 확인되지 않은 결과를 발견하면 해당
+단계에서 근거를 보완하고, 계획된 동작을 출시된 결과처럼 쓰지 않는다.
 
 계획됐지만 target에 없는 변경은 제외한다. target에 있으나 사용자에게 의미 없는 refactor,
 test-only, 문서 정리는 사용자 노트에서 생략할 수 있지만, 릴리즈 안전성이나 운영자 행동에
@@ -91,7 +88,7 @@ AudioRecorder가 두 source를 frame timeline에서 mono AAC로 합친다.
 
 ## 검증
 
-- `swift test`: <통과 수와 실제 skip/failure>
+- 저장소의 Swift·Python 검사: <실행한 명령, 통과 결과와 실제 skip/failure>
 - release build 및 <실제 서명 종류> 검증
 - <실제로 수행한 관련 수동 smoke test>
 - 릴리즈 ZIP SHA-256: `<digest>`

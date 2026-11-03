@@ -76,7 +76,7 @@ swift test             # STT fixture and device tests need local resources
 ./install.sh           # release-build, then install into /Applications
 ```
 
-The Claude Code plugin under [`plugin/`](./plugin/README.md) is separate from the app and has
+The diarization plugin for Claude Code and Codex under [`plugin/`](./plugin/README.md) is separate from the app and has
 its own suite, which needs neither the toolchain nor AWS:
 
 ```bash
@@ -84,7 +84,24 @@ cd plugin/scribird-diarize/skills/multi-speaker-diarize
 /usr/bin/python3 -m unittest discover -s tests
 ```
 
-Two things about running it:
+### Agent workflows
+
+The skills keep task boundaries in their entrypoints and load detailed instructions
+only for the current stage. The installed report writer owns report composition;
+the app/MCP and bundled helpers own parsing, calculation and external operations.
+
+| Task | Entry point |
+| --- | --- |
+| Saved meeting notes | [summarize-scribird-meetings](.agents/skills/summarize-scribird-meetings/SKILL.md): archive MCP reads and direct summary/report-data authoring. |
+| Optional speaker separation | [multi-speaker-diarize](plugin/scribird-diarize/skills/multi-speaker-diarize/SKILL.md): approved legacy-source AWS batch analysis, local merge and evidence-based naming. |
+| Release work | [prepare-scribird-release](.agents/skills/prepare-scribird-release/SKILL.md): candidate/version, Korean notes, validation/package and requested publication. |
+
+Keep these responsibilities separate when changing skills. Preserve the shared
+diarization skill's Claude/Codex frontmatter and its original-data/upload boundaries.
+Validate linked resources and existing helpers; phrase/word-count checks alone do
+not establish that the workflow preserves the user's intent.
+
+When running the Scribird app:
 
 - **Run it as a bundle, not as a bare executable.** macOS ties permissions (TCC) to the
   bundle identifier, so `swift run` can never obtain microphone or audio-capture permission.

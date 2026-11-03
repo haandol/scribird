@@ -13,9 +13,10 @@ beforehand."* 출력 버킷은 생략할 수 있지만(AWS 관리 버킷, 90일 
 
 ## 자격 증명
 
-**`aws sts get-caller-identity`가 실패한다.** 자격 증명이 없거나 만료됐다. SSO라면
-`aws sso login --profile <프로필>`이 필요한데 대화형 로그인이라 직접 실행할 수 없다.
-사용자에게 `! aws sso login --profile <프로필>`을 입력하도록 안내한다.
+**`aws sts get-caller-identity`가 실패한다.** 오류에서 자격 증명 유무와 만료 여부를 확인한다.
+SSO 로그인이 필요한 경우 선택한 프로필의 `aws sso login --profile <프로필>` 절차를
+사용한다. 사람의 인증이 필요한 단계에서만 해당 조치를 안내하며, 비밀 값을 대화에
+붙여 넣도록 요청하지 않는다.
 
 **`AccessDeniedException`이 난다.** 필요한 권한:
 
@@ -54,7 +55,9 @@ aws transcribe get-transcription-job --transcription-job-name <이름>
 
 **S3에 객체가 남았다.** 스크립트가 경로를 출력한다. Transcribe는 쓰기 권한 확인용
 `.write_access_check_file.temp`를 직접 만들기 때문에 접두사 단위로 지우는데, 그 삭제가
-실패하면 남는다. 직접 지우거나 다음 실행에서 정리된다.
+실패하면 남는다. 새 실행은 다른 접두사를 사용하므로 이전 잔여 객체를 자동으로
+정리한다고 가정하지 않는다. 해당 작업의 종료 상태와 결과 회수를 확인한 뒤, 승인된
+정리 범위 안에서 출력된 정확한 접두사만 정리한다. 보존을 선택한 객체는 지우지 않는다.
 
 ## 병합 결과가 이상하다
 
