@@ -1,0 +1,9 @@
+interface:
+  display_name: "Scribird Meeting Notes"
+  short_description: "Summarize Scribird meetings from saved transcripts"
+  default_prompt: "Use $summarize-scribird-meetings to summarize today’s recordings with source evidence and follow-up actions."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "scribird"
+      description: "Local Scribird archive tools for reading saved transcripts"

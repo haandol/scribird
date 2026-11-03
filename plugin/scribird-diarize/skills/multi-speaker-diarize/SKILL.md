@@ -14,6 +14,13 @@ Scribird의 `me`와 `remote`는 추론 결과가 아니라 독립된 캡처 경�
 `remote.m4a`처럼 여러 사람의 음성이 믹스된 소스에 AWS 화자 경계를 겹쳐
 `Unknown 1/2/3` 또는 확인된 참석자 이름으로 세분화한다.
 
+## Meeting summaries
+
+For a recap or meeting notes, use the `summarize-scribird-meetings` skill when
+available. It reads saved transcripts with Scribird MCP and reuses the report
+renderer. A summary request does not require this AWS diarization workflow,
+playable audio, or a request-specific parsing/report-generation script.
+
 ## 반드시 지킬 경계
 
 - `me`/`remote` 구분은 사실이지만 AWS 화자 라벨과 실제 이름은 추정일 수 있다.

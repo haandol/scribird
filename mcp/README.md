@@ -160,8 +160,35 @@ it. Model installation does not start recording or replace the meeting language.
 | Tool | Read contract |
 |---|---|
 | `get_live_transcript` | `include_partial` (default true), `offset` and `limit` (1–1000, default 200). Includes `isFinal`, `me`/`remote`, times and current/last session path. |
-| `list_sessions` | Optional `output_root`, `kind` (`all`, `live`, `import`), `offset`, `limit` (1–200, default 50). Returns saved paths, not meeting text. |
-| `read_session` | Absolute `session_directory`, `offset`, `limit` (1–1000, default 200). Reads persisted JSONL and returns that page's text and segments. |
+| `list_sessions` | Optional `output_root`, `kind` (`all`, `live`, `import`), `offset`, `limit` (1–200, default 50), `recording_date` (`YYYY-MM-DD`). Returns saved paths, not meeting text. |
+| `read_session` | Absolute `session_directory`, `offset`, `limit` (1–1000, default 200). Reads persisted JSONL and returns that page's original text/segments, `citationLabels`, and a whole-transcript `transcriptSummary`. |
+
+Both archive tools return `nextOffset` for the next page, or `null` when `hasMore`
+is false. Date filtering uses the live session's recording-machine local folder
+date, including same-second collision suffixes; it never uses modification time.
+Imports and unrecognized folder names do not match a date filter. Returned
+`recordingDate` and `localStartedAt` are `null` for those folders. `localStartedAt`
+is a naive local ISO timestamp: the archive folder does not preserve a timezone.
+
+`citationLabels` correspond to the returned `segments` in order, for example
+`L42 [00:03:25–00:03:30]`. The raw segments and the existing `text` field stay
+unchanged. Timecodes truncate to whole seconds; they do not refine ASR timing.
+Missing, negative, nonnumeric, nonfinite or reversed times receive `time unavailable`.
+
+`transcriptSummary` is calculated over all complete records, even for a page request:
+
+- `labelCounts` counts `me`, `remote` and/or `unknown`; these are not people counts.
+- `firstStartSeconds`, `lastEndSeconds`, `spanSeconds` and their `Timecode`
+  counterparts describe the earliest valid start through the latest valid end.
+  The span includes silent gaps and does not double-count overlap. It is neither
+  audio-file duration nor total speaking time. All time values are `null` if no
+  record has valid timing.
+- `missingOrInvalidTimingCount` counts records excluded from those time bounds.
+- `timestampGranularities` lists distinct nonempty granularity values from the
+  records. An empty list means no recorded value, not a default granularity.
+
+The [meeting-summary skill](../.agents/skills/summarize-scribird-meetings/SKILL.md)
+uses these fields without writing per-request parsers, calculators or report programs.
 
 Live offsets address a snapshot, not stable events. Partial rows can change or be
 removed by language arbitration; reread after a session/language change. Saved-session

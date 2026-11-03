@@ -164,6 +164,87 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(Exception, "absolute"):
             await self.call("list_sessions", {"output_root": "relative"})
 
+    async def test_recording_date_ignores_later_report_writes_and_keeps_collision_sessions(self):
+        collision = self.root / "2026-09-28_120000-12345678-1234-1234-1234-123456789ABC"
+        collision.mkdir()
+        (collision / "transcript.jsonl").write_text("")
+        older = self.root / "2026-09-27_230000"
+        older.mkdir()
+        (older / "transcript.jsonl").write_text("")
+        os.utime(older, (200, 200))
+        os.utime(self.live, (100, 100))
+        os.utime(collision, (100, 100))
+        args = {"output_root": str(self.root), "recording_date": "2026-09-28", "limit": 1}
+        first = await self.call("list_sessions", args)
+        self.assertEqual(first["total"], 2)
+        self.assertEqual(first["nextOffset"], 1)
+        second = await self.call("list_sessions", {**args, "offset": first["nextOffset"]})
+        self.assertFalse(second["hasMore"])
+        self.assertIsNone(second["nextOffset"])
+        sessions = first["sessions"] + second["sessions"]
+        self.assertEqual({item["sessionDirectory"] for item in sessions}, {str(self.live), str(collision)})
+        self.assertTrue(all(item["localStartedAt"] == "2026-09-28T12:00:00" for item in sessions))
+        self.assertTrue(all(item["recordingDate"] == "2026-09-28" for item in sessions))
+
+    async def test_recording_date_requires_a_real_iso_date_and_does_not_date_imports(self):
+        for value in ("20260928", "2026-02-30", "yesterday"):
+            with self.subTest(value=value), self.assertRaisesRegex(Exception, "YYYY-MM-DD"):
+                await self.call("list_sessions", {"output_root": str(self.root), "recording_date": value})
+        result = await self.call("list_sessions", {"output_root": str(self.root), "kind": "import"})
+        self.assertIsNone(result["sessions"][0]["recordingDate"])
+        self.assertIsNone(result["sessions"][0]["localStartedAt"])
+
+    async def test_citations_and_whole_transcript_bounds_survive_overlap_and_unplayable_audio(self):
+        lines = [
+            dict(id="first", speaker="remote", start=0, end=5, text="first", timestampGranularity="chunk"),
+            dict(id="last", speaker="remote", start=6380, end=6385, text="last", timestampGranularity="chunk"),
+            dict(id="overlap", speaker="me", start=2, end=4, text="overlap", timestampGranularity="chunk"),
+        ]
+        self.jsonl.write_text("".join(json.dumps(line) + "\n" for line in lines) + '{"text":"partial')
+        audio = self.live / "meeting.m4a"
+        audio.write_bytes(b"unfinalized container without a moov atom")
+        original = self.jsonl.read_bytes()
+        result = await self.call("read_session", {"session_directory": str(self.live), "offset": 1, "limit": 1})
+        self.assertEqual(result["segments"], [lines[1]])
+        self.assertEqual(result["text"], "last")
+        self.assertEqual(result["citationLabels"], ["L2 [01:46:20–01:46:25]"])
+        self.assertEqual(result["nextOffset"], 2)
+        self.assertTrue(result["incompleteTrailingLine"])
+        summary = result["transcriptSummary"]
+        self.assertEqual(summary["labelCounts"], {"remote": 2, "me": 1})
+        self.assertEqual(summary["spanSeconds"], 6385)
+        self.assertEqual(summary["firstStartTimecode"], "00:00:00")
+        self.assertEqual(summary["lastEndTimecode"], "01:46:25")
+        self.assertEqual(summary["spanTimecode"], "01:46:25")
+        self.assertEqual(summary["missingOrInvalidTimingCount"], 0)
+        self.assertEqual(summary["timestampGranularities"], ["chunk"])
+        self.assertEqual(self.jsonl.read_bytes(), original)
+        self.assertEqual(audio.read_bytes(), b"unfinalized container without a moov atom")
+        last = await self.call("read_session", {"session_directory": str(self.live), "offset": result["nextOffset"]})
+        self.assertIsNone(last["nextOffset"])
+        self.assertEqual(last["citationLabels"], ["L3 [00:00:02–00:00:04]"])
+
+    async def test_missing_and_invalid_times_remain_unknown_without_blocking_text(self):
+        lines = [
+            dict(id="missing", speaker="unknown", text="missing"),
+            dict(id="reversed", speaker="remote", start=7, end=6, text="reversed"),
+            dict(id="negative", speaker="remote", start=-1, end=1, text="negative"),
+            dict(id="boolean", speaker="me", start=True, end=2, text="boolean"),
+            dict(id="fractional", speaker="me", start=0.25, end=1.75, text="fractional"),
+        ]
+        self.jsonl.write_text("".join(json.dumps(line) + "\n" for line in lines))
+        result = await self.call("read_session", {"session_directory": str(self.live)})
+        self.assertEqual(result["segments"], lines)
+        self.assertEqual(result["citationLabels"][0], "L1 [time unavailable]")
+        self.assertEqual(result["citationLabels"][-1], "L5 [00:00:00–00:00:01]")
+        self.assertEqual(result["transcriptSummary"]["missingOrInvalidTimingCount"], 4)
+        self.assertEqual(result["transcriptSummary"]["spanSeconds"], 1.5)
+        empty = await self.call("read_session", {"session_directory": str(self.imported)})
+        self.assertEqual(empty["total"], 0)
+        self.assertIsNone(empty["nextOffset"])
+        self.assertIsNone(empty["transcriptSummary"]["spanTimecode"])
+        self.assertEqual(empty["citationLabels"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

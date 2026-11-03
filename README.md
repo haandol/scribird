@@ -177,7 +177,17 @@ for client configuration, executable selection, multiple app instances and timeo
 | **Transcripts** | Read current or saved transcripts, list sessions, and transcribe local audio files |
 | **App access** | Launch the app, read status and warnings, show windows, dismiss errors, and request a release check |
 
-For a meeting using both Korean and English:
+For a recap of saved recordings, use the
+[`summarize-scribird-meetings` skill](.agents/skills/summarize-scribird-meetings/SKILL.md).
+It reads `list_sessions` and `read_session`, copies their citation labels and
+transcript statistics, and writes the summary or report input directly. No per-meeting
+parser or report-generation program is needed. Install the skill from
+`.agents/skills/summarize-scribird-meetings` with your agent's skill installer;
+the Scribird MCP connection is configured separately. Saved-text summaries work
+without playable audio or a running app. Speaker diarization remains the separate
+opt-in workflow described below.
+
+To record a live meeting using both Korean and English:
 
 1. Call `launch_app` if needed, then `get_speech_models`. If a required model is
    missing, call `install_speech_model` and poll until installation finishes.
