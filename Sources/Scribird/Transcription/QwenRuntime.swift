@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum QwenRuntime {
@@ -22,6 +23,12 @@ enum QwenRuntime {
             }
             return python
         }
+        // Include both dependency inputs so updates cannot reuse stale packages or
+        // mutate an environment still in use by another worker.
+        var dependencyInputs = try Data(contentsOf: runtime.appending(path: "pyproject.toml"))
+        dependencyInputs.append(0)
+        dependencyInputs.append(try Data(contentsOf: runtime.appending(path: "uv.lock")))
+        let identity = SHA256.hash(data: dependencyInputs).map { String(format: "%02x", $0) }.joined()
         let parent = supportDirectory.appending(path: "Scribird/QwenRuntime")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let lockURL = parent.appending(path: ".setup.lock")
@@ -35,7 +42,7 @@ enum QwenRuntime {
             try await Task.sleep(for: .milliseconds(50))
         }
         try Task.checkCancellation()
-        let environment = parent.appending(path: "0.1.0")
+        let environment = parent.appending(path: "locked-\(identity)")
         let python = environment.appending(path: "bin/python")
         let marker = environment.appending(path: ".scribird-ready")
         if FileManager.default.isExecutableFile(atPath: python.path),

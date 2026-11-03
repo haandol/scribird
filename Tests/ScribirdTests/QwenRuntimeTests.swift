@@ -30,13 +30,16 @@ final class QwenRuntimeTests: XCTestCase {
         for fails in [true, false] {
             let root = try makeRoot()
             defer { try? FileManager.default.removeItem(at: root) }
+            let attemptedEnvironment = LockedBox<String?>(nil)
             do {
-                _ = try await QwenRuntime.prepare(runtime: root, supportDirectory: root, variables: [:], uvCandidates: ["/usr/bin/true"]) { _, _, _ in
+                _ = try await QwenRuntime.prepare(runtime: root, supportDirectory: root, variables: [:], uvCandidates: ["/usr/bin/true"]) { _, _, environment in
+                    attemptedEnvironment.mutate { $0 = environment["UV_PROJECT_ENVIRONMENT"] }
                     if fails { throw CocoaError(.fileWriteNoPermission) }
                 }
                 XCTFail("Incomplete setup must fail")
             } catch {
-                XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "Scribird/QwenRuntime/0.1.0/.scribird-ready").path))
+                let destination = URL(fileURLWithPath: try XCTUnwrap(attemptedEnvironment.value))
+                XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appending(path: ".scribird-ready").path))
             }
         }
     }
@@ -48,9 +51,11 @@ final class QwenRuntimeTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let (ready, signal) = AsyncStream<Void>.makeStream()
         let (release, finish) = AsyncStream<Void>.makeStream()
+        let attemptedEnvironment = LockedBox<String?>(nil)
         let task = Task {
             defer { signal.finish() }
             return try await QwenRuntime.prepare(runtime: root, supportDirectory: root, variables: [:], uvCandidates: ["/usr/bin/true"]) { _, _, environment in
+                attemptedEnvironment.mutate { $0 = environment["UV_PROJECT_ENVIRONMENT"] }
                 try QwenRuntimeTests.writePython(environment)
                 signal.yield()
                 for await _ in release { break }
@@ -61,7 +66,8 @@ final class QwenRuntimeTests: XCTestCase {
         task.cancel()
         finish.finish()
         do { _ = try await task.value; XCTFail("Interrupted setup must not succeed") } catch {}
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appending(path: "Scribird/QwenRuntime/0.1.0/.scribird-ready").path))
+        let destination = URL(fileURLWithPath: try XCTUnwrap(attemptedEnvironment.value))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appending(path: ".scribird-ready").path))
         let calls = LockedBox(0)
         _ = try await QwenRuntime.prepare(runtime: root, supportDirectory: root, variables: [:], uvCandidates: ["/usr/bin/true"]) { _, _, environment in
             calls.mutate { $0 += 1 }
@@ -100,10 +106,62 @@ final class QwenRuntimeTests: XCTestCase {
         } catch { XCTAssertTrue(error.localizedDescription.contains("uv")) }
     }
 
+    /// A dependency update must take effect without changing a worker's existing environment.
+    func test_changedDependencyInputs_prepareSeparateEnvironmentAndReuseMatchingOne() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let calls = LockedBox(0)
+        let setup: QwenRuntime.Setup = { _, _, environment in
+            calls.mutate { $0 += 1 }
+            try QwenRuntimeTests.writePython(environment)
+        }
+        var previous = try await QwenRuntime.prepare(runtime: root, supportDirectory: root,
+                                                    variables: [:], uvCandidates: ["/usr/bin/true"], setup: setup)
+        for file in ["uv.lock", "pyproject.toml"] {
+            let originalPython = try Data(contentsOf: previous)
+            let input = root.appending(path: file)
+            var updated = try Data(contentsOf: input)
+            updated.append(Data("\n# updated dependency input\n".utf8))
+            try updated.write(to: input)
+            let next = try await QwenRuntime.prepare(runtime: root, supportDirectory: root,
+                                                    variables: [:], uvCandidates: ["/usr/bin/true"], setup: setup)
+            XCTAssertNotEqual(next, previous)
+            XCTAssertEqual(try Data(contentsOf: previous), originalPython)
+            let reused = try await QwenRuntime.prepare(runtime: root, supportDirectory: root,
+                                                      variables: [:], uvCandidates: []) { _, _, _ in
+                XCTFail("Unchanged dependency inputs must reuse the matching environment")
+            }
+            XCTAssertEqual(reused, next)
+            previous = next
+        }
+        XCTAssertEqual(calls.value, 3)
+    }
+
+    /// The old fixed directory could otherwise keep vulnerable dependencies across app updates.
+    func test_legacyReadyEnvironment_doesNotHideNewDependencyLock() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let legacy = root.appending(path: "Scribird/QwenRuntime/0.1.0")
+        try Self.writePython(["UV_PROJECT_ENVIRONMENT": legacy.path])
+        try Data().write(to: legacy.appending(path: ".scribird-ready"))
+        let calls = LockedBox(0)
+        let python = try await QwenRuntime.prepare(runtime: root, supportDirectory: root,
+                                                  variables: [:], uvCandidates: ["/usr/bin/true"]) { _, _, environment in
+            calls.mutate { $0 += 1 }
+            try QwenRuntimeTests.writePython(environment)
+        }
+        XCTAssertEqual(calls.value, 1)
+        XCTAssertNotEqual(python, legacy.appending(path: "bin/python"))
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: legacy.appending(path: "bin/python").path))
+    }
+
     /// Creates an isolated root so tests cannot create or modify the user's environment.
     private func makeRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appending(path: "scribird-runtime-test-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        try Data("[project]\nname = \"runtime-test\"\nversion = \"0.1.0\"\n".utf8)
+            .write(to: root.appending(path: "pyproject.toml"))
+        try Data("version = 1\n".utf8).write(to: root.appending(path: "uv.lock"))
         return root
     }
 

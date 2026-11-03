@@ -8,14 +8,20 @@ worker per source so microphone and system audio never share recognition context
 
 The app bundles the worker, project/lock files, and feature-extractor configuration.
 On first use it uses `uv` to prepare Python 3.12 under
-`~/Library/Application Support/Scribird/QwenRuntime/0.1.0`. Subsequent calls run that
-Python directly. `SCRIBIRD_UV_EXECUTABLE` overrides uv discovery, and
-`SCRIBIRD_QWEN_PYTHON` can point to an already prepared interpreter.
+`~/Library/Application Support/Scribird/QwenRuntime/locked-<digest>`. The digest
+identifies the bundled `pyproject.toml` and `uv.lock`. Matching inputs reuse that
+Python directly; an update to either file prepares a separate environment so
+dependency/security updates take effect without changing an active worker's files.
+`SCRIBIRD_UV_EXECUTABLE` overrides uv discovery, and `SCRIBIRD_QWEN_PYTHON` can point
+to an already prepared interpreter. That explicit override is user-managed and
+must be updated separately.
 
 Managed first-use preparation holds an exclusive local file lock. Concurrent
 requests reuse the completed environment, and interrupted or incomplete setup
 does not create the readiness marker. A ready environment works even if `uv` is
-subsequently unavailable.
+subsequently unavailable. A new dependency set requires `uv` for its first setup.
+Older managed environments, including the legacy `0.1.0` directory, are retained
+and are not treated as a match for a new lock. Model weights use a separate cache.
 
 Hugging Face downloads the pinned model into its normal local cache, then the
 worker creates a local view under `~/Library/Application Support/Scribird/Qwen3/`

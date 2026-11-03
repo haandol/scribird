@@ -101,6 +101,18 @@ initial runtime/model preparation; installing Apple English or Korean assets is 
 required for this engine. The selector is disabled while preparing, recording or stopping.
 The separate Transcribe File window controls only that file task's engine.
 
+### Qwen3 prepares Python again after updating Scribird
+
+Starting with 0.3.1, managed Python environments are matched to the app's bundled
+dependency files. An update to those files prepares a separate environment on the
+next Qwen3 use; subsequent calls reuse it. This makes dependency/security fixes
+take effect even when an older environment is already ready. Keep `uv` available
+for this setup. The model cache is separate and complete cached weights are reused.
+
+If you set `SCRIBIRD_QWEN_PYTHON`, that interpreter remains under your control and
+is not synchronized by the app. Update its dependencies separately, or remove the
+override and let the app prepare the current managed environment.
+
 ### Only my own voice is transcribed
 
 The system-audio path is down. In order of likelihood:
