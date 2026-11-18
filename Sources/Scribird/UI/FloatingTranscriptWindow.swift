@@ -57,6 +57,7 @@ final class FloatingTranscriptWindow {
         // 명시적으로 앞으로 끌어와야 한다. 스크롤·텍스트 선택이 이것에 의존한다.
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        Task { await recorder.refreshLiveModelAvailability() }
     }
 
     func hide() {

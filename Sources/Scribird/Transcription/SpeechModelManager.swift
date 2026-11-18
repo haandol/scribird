@@ -53,13 +53,13 @@ final class SpeechModelManager {
     }
 
     private let installer: any SpeechModelInstalling
-    private(set) var states: [SpeechModelLanguage: State]
+    private var states: [SpeechModelLanguage: State] = [:]
+    private(set) var hasCheckedInventory = false
+    @ObservationIgnored private var revision = 0
+    @ObservationIgnored private var appliedRevision: [SpeechModelLanguage: Int] = [:]
 
     init(installer: any SpeechModelInstalling = SystemSpeechModelInstaller()) {
         self.installer = installer
-        self.states = Dictionary(
-            uniqueKeysWithValues: SpeechModelLanguage.allCases.map { ($0, .notInstalled) }
-        )
     }
 
     func state(for language: SpeechModelLanguage) -> State {
@@ -67,26 +67,34 @@ final class SpeechModelManager {
     }
 
     var availableLanguages: [TranscriptionLanguage] {
-        guard case .installed = state(for: .english) else { return [] }
+        guard hasRequiredEnglish else { return [] }
         return TranscriptionLanguage.available(
             installedIdentifiers: installedModels.map(\.locale.identifier)
         )
     }
 
-    var hasInstalledLanguage: Bool {
-        !availableLanguages.isEmpty
+    var hasRequiredEnglish: Bool {
+        state(for: .english) == .installed
     }
 
     func refresh() async {
-        let installed = normalizedSet(await installer.installedLocaleIdentifiers())
+        let readRevision = nextRevision()
+        let expected = SpeechModelLanguage.allCases.filter { $0 == .english || state(for: $0) == .installed }
+        let identifiers = await SpeechModelInstaller.confirmedInstalledIdentifiers(
+            for: expected.map(\.locale), read: installer.installedLocaleIdentifiers
+        )
         for language in SpeechModelLanguage.allCases {
-            guard !state(for: language).isInstalling else { continue }
-            if installed.contains(normalized(language.locale.identifier)) {
+            // A read started before another refresh or a completed installation can return last.
+            guard readRevision > appliedRevision[language, default: 0],
+                  !state(for: language).isInstalling else { continue }
+            appliedRevision[language] = readRevision
+            if SpeechModelInstaller.allInstalled(requested: [language.locale], installedIdentifiers: identifiers) {
                 states[language] = .installed
             } else if case .installed = state(for: language) {
                 states[language] = .notInstalled
             }
         }
+        hasCheckedInventory = true
     }
 
     func install(_ language: SpeechModelLanguage) async {
@@ -96,14 +104,16 @@ final class SpeechModelManager {
         do {
             try await installer.install(language)
 
-            let installed = normalizedSet(await installer.installedLocaleIdentifiers())
-            guard installed.contains(normalized(language.locale.identifier)) else {
+            guard await SpeechModelInstaller.areInstalled(
+                locales: [language.locale], read: installer.installedLocaleIdentifiers
+            ) else {
                 throw SpeechModelInstaller.InstallError.incompleteInstallation(language.locale)
             }
             states[language] = .installed
         } catch {
             states[language] = .failed(error.localizedDescription)
         }
+        appliedRevision[language] = nextRevision()
     }
 
     func installRequiredEnglishIfNeeded() async {
@@ -117,17 +127,11 @@ final class SpeechModelManager {
     }
 
     private var installedModels: [SpeechModelLanguage] {
-        SpeechModelLanguage.allCases.filter {
-            if case .installed = state(for: $0) { return true }
-            return false
-        }
+        SpeechModelLanguage.allCases.filter { state(for: $0) == .installed }
     }
 
-    private func normalizedSet(_ identifiers: [String]) -> Set<String> {
-        Set(identifiers.map(normalized))
-    }
-
-    private func normalized(_ identifier: String) -> String {
-        identifier.replacingOccurrences(of: "_", with: "-").lowercased()
+    private func nextRevision() -> Int {
+        revision += 1
+        return revision
     }
 }

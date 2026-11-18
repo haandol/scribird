@@ -87,7 +87,7 @@ enum SpeechModelInstaller {
 
     /// 예약 시도의 결과. 실패했어도 모델이 설치돼 있으면 녹취는 진행한다.
     struct ReservationOutcome {
-        /// 실제로 예약된 로케일. 세션 종료 시 해제 대상이다.
+        /// Held locales remain subscribed across recording sessions.
         var reserved: [Locale]
         /// 예약하지 못한 로케일과 시스템이 알려준 원인.
         var unreserved: [(locale: Locale, reason: String?)]
@@ -210,11 +210,27 @@ enum SpeechModelInstaller {
     /// 원래 구성으로 되돌리는 교체는 성공을 반환하면서 실제로 복구하지 못했으며, 아무 문제
     /// 없던 기존 로케일의 결과 스트림까지 같은 에러로 닫혀 진행 중이던 발화가 사라졌다.
     /// 그러므로 시도해 보고 되돌리는 방식은 쓸 수 없고, 넣기 전에 확인하는 것만이 안전하다.
-    static func areInstalled(locales: [Locale]) async -> Bool {
+    static func areInstalled(
+        locales: [Locale],
+        read: @Sendable () async -> [String] = installedLocaleIdentifiers
+    ) async -> Bool {
         allInstalled(
             requested: locales,
-            installedIdentifiers: await SpeechTranscriber.installedLocales.map(\.identifier)
+            installedIdentifiers: await confirmedInstalledIdentifiers(for: locales, read: read)
         )
+    }
+
+    /// Confirm an unexpected omission against a fresh inventory before disabling the
+    /// language or rejecting a session. Both reads are read-only, including for file imports.
+    static func confirmedInstalledIdentifiers(
+        for expected: [Locale],
+        read: @Sendable () async -> [String]
+    ) async -> [String] {
+        let identifiers = await read()
+        if expected.isEmpty || allInstalled(requested: expected, installedIdentifiers: identifiers) {
+            return identifiers
+        }
+        return await read()
     }
 
     /// 설치 판정. 시스템 조회에서 떼어내 테스트가 실측된 목록을 그대로 넣을 수 있게 한다.

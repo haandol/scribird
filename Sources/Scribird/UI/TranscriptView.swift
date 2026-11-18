@@ -398,6 +398,8 @@ struct TranscriptView: View {
         Group {
             if recorder.canStartRecording {
                 transcriptEmptyState
+            } else if !recorder.modelManager.hasCheckedInventory {
+                ProgressView(tr("설치된 언어 모델 확인 중", "Checking installed language models"))
             } else {
                 requiredEnglishModelState
             }
@@ -461,6 +463,12 @@ struct TranscriptView: View {
                 .buttonStyle(.bordered)
             case .installed:
                 EmptyView()
+            }
+            if !state.isInstalling {
+                Button(tr("설치 상태 다시 확인", "Check model availability again")) {
+                    Task { await recorder.refreshModelAvailability() }
+                }
+                .buttonStyle(.link)
             }
         }
     }

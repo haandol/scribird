@@ -93,7 +93,7 @@ final class AppControl {
             return .value(settings())
         case .selectAudioDevice: try await selectAudioDevice(args)
         case .installSpeechModel:
-            try startModelInstallation(args)
+            try await startModelInstallation(args)
             return .value(models())
         case .setKeyboardShortcut: return .value(try updateShortcut(args))
         case .showWindow:
@@ -106,8 +106,9 @@ final class AppControl {
         return .status
     }
 
-    private func startModelInstallation(_ args: ControlArguments) throws {
+    private func startModelInstallation(_ args: ControlArguments) async throws {
         let model: SpeechModelLanguage = try args.requiredEnum("language")
+        await recorder.modelManager.refresh()
         if recorder.modelManager.state(for: model) != .installed, installations[model] == nil {
             installations[model] = Task { [weak self] in
                 guard let self else { return }

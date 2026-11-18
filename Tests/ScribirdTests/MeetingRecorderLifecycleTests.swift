@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Observation
 import Speech
@@ -166,6 +167,52 @@ final class MeetingRecorderLifecycleTests: XCTestCase {
         await recorder.chooseLanguage(.korean)
         XCTAssertEqual(recorder.language, .korean)
         await recorder.stop()
+    }
+
+    func test_modelAvailabilityRecovers_restoresChosenLanguageWithoutRelaunchOrInstall() async {
+        let installer = FakeSpeechModelInstaller(installed: ["en_US", "ko_KR"])
+        let recorder = RecordingHarness(root: root).makeRecorder(models: installer)
+        await recorder.refreshModelAvailability()
+        await recorder.chooseLanguage(.auto)
+
+        await installer.setInstalled(["en_US"])
+        await recorder.refreshModelAvailability()
+        XCTAssertEqual(recorder.language, .english)
+        XCTAssertEqual(RecordingPreferences.language(), .auto)
+
+        await installer.setInstalled(["ko_KR"])
+        await recorder.refreshModelAvailability()
+        XCTAssertFalse(recorder.canStartRecording)
+        await installer.setInstalled(["en_US", "ko_KR"])
+        await recorder.refreshModelAvailability()
+        XCTAssertTrue(recorder.canStartRecording)
+        XCTAssertEqual(recorder.language, .auto)
+        let installations = await installer.installCalls()
+        XCTAssertTrue(installations.isEmpty)
+    }
+
+    func test_appBecomesActive_recoversRecordingInSameProcessWithoutInstall() async {
+        let installer = FakeSpeechModelInstaller(installed: ["ko_KR"])
+        let recorder = RecordingHarness(root: root).makeRecorder(models: installer)
+        let delegate = AppDelegate(recorder: recorder)
+        await recorder.refreshModelAvailability()
+        XCTAssertFalse(recorder.canStartRecording)
+
+        await installer.setInstalled(["en_US", "ko_KR"])
+        let refreshed = expectation(description: "Recording availability changed")
+        withObservationTracking {
+            _ = recorder.canStartRecording
+        } onChange: {
+            refreshed.fulfill()
+        }
+        delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        await fulfillment(of: [refreshed], timeout: 2)
+
+        XCTAssertTrue(recorder.canStartRecording)
+        XCTAssertEqual(recorder.availableLanguages, [.english, .korean, .auto])
+        XCTAssertEqual(recorder.state, .idle)
+        let calls = await installer.installCalls()
+        XCTAssertTrue(calls.isEmpty)
     }
 
     func test_reclaimedRequestedLanguage_failsBeforePreparingAnotherLanguage() async {
@@ -663,6 +710,41 @@ private final class StubCapture: CaptureSource {
 
 
 extension MeetingRecorderLifecycleTests {
+    func test_mcpInstallAfterReclamation_rechecksCachedInstalledState() async throws {
+        let installer = FakeSpeechModelInstaller(installed: ["en_US", "ko_KR"], behavior: .incomplete)
+        let recorder = RecordingHarness(root: root).makeRecorder(models: installer)
+        let control = AppControl(recorder: recorder)
+        await recorder.refreshModelAvailability()
+        await installer.setInstalled(["en_US"])
+
+        let response = await control.handle(ControlRequest(
+            command: "install_speech_model", arguments: ["language": .string("korean")]
+        ))
+        XCTAssertNil(response.error)
+        guard case .array(let models) = response.result?.object?["models"] else {
+            return XCTFail("Expected model states")
+        }
+        let korean = try XCTUnwrap(models.compactMap(\.object).first { $0["language"] == .string("korean") })
+        XCTAssertTrue(korean["state"] == .string("installing") || korean["state"] == .string("failed"))
+    }
+
+    func test_mcpQwenRecordingAndLanguageChange_doNotQueryAppleModels() async {
+        let installer = FakeSpeechModelInstaller()
+        let harness = RecordingHarness(root: root)
+        let recorder = harness.makeRecorder(models: installer)
+        recorder.chooseEngine(.qwen3)
+        let control = AppControl(recorder: recorder)
+
+        let start = await control.handle(ControlRequest(command: "start_recording", arguments: ["language": .string("auto")]))
+        XCTAssertNil(start.error)
+        let change = await control.handle(ControlRequest(command: "set_recording_language", arguments: ["language": .string("korean")]))
+        XCTAssertNil(change.error)
+        XCTAssertEqual(recorder.language, .korean)
+        await recorder.stop()
+        let reads = await installer.inventoryReads
+        XCTAssertEqual(reads, 0)
+    }
+
     func test_mcpLanguageSwitch_preservesPendingTextAndCapture() async throws {
         let harness = RecordingHarness(root: root)
         let recorder = harness.makeRecorder()

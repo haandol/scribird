@@ -12,8 +12,6 @@ extension AppControl {
             return
         }
         try requireStableSession()
-        await recorder.modelManager.refresh()
-        try requireStableSession()
         if let requested { try await chooseLanguage(requested) }
         await recorder.start()
         try throwRecorderFailure()
@@ -40,8 +38,6 @@ extension AppControl {
     func setRecordingLanguage(_ args: ControlArguments) async throws {
         let requested: TranscriptionLanguage = try args.requiredEnum("language")
         try requireStableSession()
-        await recorder.modelManager.refresh()
-        try requireStableSession()
         try await chooseLanguage(requested)
     }
 
@@ -57,6 +53,10 @@ extension AppControl {
     }
 
     private func chooseLanguage(_ language: TranscriptionLanguage) async throws {
+        if recorder.engine == .speechAnalyzer {
+            await recorder.modelManager.refresh()
+            try requireStableSession()
+        }
         guard recorder.availableLanguages.contains(language) else {
             throw ControlError("필요한 언어 모델을 먼저 설치해 주세요.",
                                "Install the required speech models first using install_speech_model; auto requires English and Korean.")

@@ -108,7 +108,7 @@ final class MeetingRecorder {
         engine = next
         RecordingPreferences.save(engine: next)
         engineWarning = nil
-        if next == .speechAnalyzer { reconcileLanguageSelection() }
+        reconcileLanguageSelection()
     }
 
     /// 언어를 바꾸지 못한 이유. 다음 전환 시도나 세션 시작에서 지운다.
@@ -119,7 +119,7 @@ final class MeetingRecorder {
     }
 
     var canStartRecording: Bool {
-        engine == .qwen3 || modelManager.hasInstalledLanguage
+        engine == .qwen3 || modelManager.hasRequiredEnglish
     }
 
     /// The original recorder runs before the bounded analyzer queue, so expose any overflow separately.
@@ -141,6 +141,11 @@ final class MeetingRecorder {
     func refreshModelAvailability() async {
         await modelManager.refresh()
         reconcileLanguageSelection()
+    }
+
+    func refreshLiveModelAvailability() async {
+        guard engine == .speechAnalyzer else { return }
+        await refreshModelAvailability()
     }
 
     func installRequiredEnglishIfNeeded() async {
@@ -533,7 +538,7 @@ final class MeetingRecorder {
             if engine == .speechAnalyzer {
                 let requested = language
                 await modelManager.refresh()
-                guard modelManager.hasInstalledLanguage else {
+                guard modelManager.hasRequiredEnglish else {
                     throw RecorderError.noInstalledLanguageModels
                 }
                 guard modelManager.availableLanguages.contains(requested) else {
@@ -1184,16 +1189,12 @@ final class MeetingRecorder {
     }
 
     private func reconcileLanguageSelection() {
-        guard engine == .speechAnalyzer, !state.isBusy else { return }
-        let available = modelManager.availableLanguages
-        guard !available.isEmpty else { return }
+        guard !state.isBusy else { return }
+        let available = availableLanguages
+        guard let fallback = available.first else { return }
         let preferred = RecordingPreferences.language()
-        let resolved = available.contains(preferred) ? preferred : available[0]
-        guard state != .recording else { return }
-        language = resolved
-        if resolved != preferred {
-            RecordingPreferences.save(language: resolved)
-        }
+        // A temporary inventory omission can change the picker, but only the user changes the preference.
+        language = available.contains(preferred) ? preferred : fallback
     }
 
 #if DEBUG

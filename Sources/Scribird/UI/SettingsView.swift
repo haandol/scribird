@@ -224,7 +224,7 @@ struct SettingsView: View {
                     recorder: recorder
                 )
 
-                if recorder.availableLanguages.isEmpty {
+                if recorder.modelManager.hasCheckedInventory && recorder.availableLanguages.isEmpty {
                     Text(tr("필수 English 모델이 설치되면 회의 언어를 선택할 수 있습니다.",
                              "Meeting languages become available after the required English model is installed."))
                         .captionStyle(.orange)
@@ -234,8 +234,12 @@ struct SettingsView: View {
                         .captionStyle(.secondary)
                 }
 
-                ForEach(SpeechModelLanguage.allCases) { language in
-                    speechModelRow(language)
+                if recorder.modelManager.hasCheckedInventory {
+                    ForEach(SpeechModelLanguage.allCases) { language in
+                        speechModelRow(language)
+                    }
+                } else {
+                    ProgressView(tr("설치된 언어 모델 확인 중", "Checking installed language models"))
                 }
             }
 
@@ -275,7 +279,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .task {
+        .task(id: recorder.engine) {
             await recorder.refreshModelAvailability()
         }
     }

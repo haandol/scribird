@@ -179,6 +179,16 @@ failures — including on machines holding no reservations at all.
 
 #### A model stays on *Downloading*, or Korean disappeared after working before
 
+If a previously installed language disappears, reopen the transcript or bring Scribird
+to the foreground. You can also open **Settings › Recording** to see English and Korean
+separately. These actions recheck macOS's installed languages without downloading anything.
+If the transcript says English is required, **Check model availability again** does the
+same check in place. English is required for live SpeechAnalyzer recording, so the meeting
+language picker can be empty even while Settings still shows Korean as installed.
+
+If the selected language becomes unavailable, the idle picker shows an available language.
+Your saved choice returns when its models are available again, unless you select a new one.
+
 If English or Korean disappears **after stopping a recording** in Scribird 0.1.8 or
 earlier, update to 0.1.9 and install the missing model once from Settings › Recording.
 Those builds released the recording's locale reservations at stop. On macOS 26.6.2,

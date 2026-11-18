@@ -21,6 +21,7 @@ struct ScribirdApp: App {
                 languageSettings: delegate.languageSettings,
                 openSettings: { delegate.windows.showSettings() }
             )
+            .task { await delegate.recorder.refreshLiveModelAvailability() }
         } label: {
             menuBarIcon
         }
@@ -70,13 +71,22 @@ struct MenuBarRecordingAppearance: Equatable {
 /// 생명주기에 매달지 않고 시작 콜백에서 수행한다.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let recorder = MeetingRecorder()
+    let recorder: MeetingRecorder
     let hotKeySettings = HotKeySettings()
     let settingsHotKeySettings = SettingsHotKeySettings()
     let microphoneMuteHotKeySettings = MicrophoneMuteHotKeySettings()
     let updateChecker = UpdateChecker()
     let languageSettings = AppLanguageSettings()
     private var microphoneMuteMonitor: Any?
+
+    override convenience init() {
+        self.init(recorder: MeetingRecorder())
+    }
+
+    init(recorder: MeetingRecorder) {
+        self.recorder = recorder
+    }
+
     private lazy var control = AppControl(
         recorder: recorder, languageSettings: languageSettings,
         hotKeySettings: hotKeySettings, settingsHotKeySettings: settingsHotKeySettings,
@@ -123,10 +133,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recorder?.toggleMicrophoneMute()
             return nil
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(refreshSpeechModels(_:)),
+            name: NSWorkspace.didWakeNotification, object: nil
+        )
         Task { await recorder.installRequiredEnglishIfNeeded() }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        refreshSpeechModels(notification)
+    }
+
+    @objc nonisolated private func refreshSpeechModels(_ notification: Notification) {
+        Task { @MainActor in await recorder.refreshLiveModelAvailability() }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         controlServer.stop()
         if let microphoneMuteMonitor {
             NSEvent.removeMonitor(microphoneMuteMonitor)
